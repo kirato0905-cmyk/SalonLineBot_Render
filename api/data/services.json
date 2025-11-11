@@ -25,7 +25,7 @@
       "description": "ヘアトリートメントサービス"
     }
   },
-  "staff": {
+   "staff": {
     "staff_1": {
       "name": "山田",
       "specialty": "カット・カラー",
@@ -33,12 +33,19 @@
       "email_env": "STAFF_TANAKA_EMAIL",
       "color_id": "1"
     },
-     "staff_2": {
+    "staff_2": {
       "name": "佐藤",
       "specialty": "カラー・パーマ",
       "experience": "3年",
       "email_env": "STAFF_SATO_EMAIL",
-      "color_id": "2"
+      "color_id": "1"
+    },
+    "staff_3": {
+      "name": "鈴木",
+      "specialty": "カット・パーマ",
+      "experience": "7年",
+      "email_env": "STAFF_SUZUKI_EMAIL",
+      "color_id": "1"
     }
   }
 }
