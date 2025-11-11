@@ -32,6 +32,13 @@
       "experience": "5年",
       "email_env": "STAFF_TANAKA_EMAIL",
       "color_id": "1"
+    },
+     "staff_2": {
+      "name": "佐藤",
+      "specialty": "カラー・パーマ",
+      "experience": "3年",
+      "email_env": "STAFF_SATO_EMAIL",
+      "color_id": "2"
     }
   }
 }
