@@ -446,15 +446,31 @@ class ReservationFlow:
         self.user_states[user_id]["step"] = "time_selection"
         
         # Get available time periods for selected date from Google Calendar
-        # Use staff-specific availability if staff is already selected
         staff_name = self.user_states[user_id]["data"].get("staff")
         available_slots = self._get_available_slots(selected_date, staff_name)
         available_periods = [slot for slot in available_slots if slot["available"]]
+
+        # Get service duration
+        service_name = self.user_states[user_id]["data"].get("service")
+        service_info = {}
+        for service_id, service_data in self.services.items():
+            if service_data.get("name") == service_name:
+                service_info = service_data
+                break
+        service_duration = service_info.get("duration", 60)  # Default to 60 minutes
+
+        # Filter only periods where service fits
+        filtered_periods = []
+        for period in available_periods:
+            slot_duration = self._calculate_time_duration_minutes(period["time"], period["end_time"])
+            if slot_duration >= service_duration:
+                filtered_periods.append(period)
         
-        if not available_periods:
+        if not filtered_periods:
             # No available slots for selected date - return to date selection
             self.user_states[user_id]["step"] = "date_selection"
-            return f"""申し訳ございませんが、{selected_date}は空いている時間がありません。
+            # ...existing "no available slot" message...
+            return f"""申し訳ございませんが、{selected_date}は{service_name}（{service_duration}分）の予約可能な時間がありません。
 
 他の日付をお選びください。
 
@@ -542,13 +558,13 @@ class ReservationFlow:
         
         # Format available periods for display
         period_strings = []
-        for period in available_periods:
+        for period in filtered_periods:
             start_time = period["time"]
             end_time = period["end_time"]
             period_strings.append(f"・{start_time}~{end_time}")
         
         return f"""{selected_date}ですね！
-予約可能な時間帯は以下の通りです：
+{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです：
 
 {chr(10).join(period_strings)}
 
