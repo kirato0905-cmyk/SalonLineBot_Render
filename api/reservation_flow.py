@@ -519,7 +519,7 @@ class ReservationFlow:
                 else:
                     max_duration_str = f"{max_minutes}分"
                 
-                return f"""申し訳ございませんが、{selected_date}の空いている時間帯では、{service_name}（{duration_str}）の予約ができません。
+                return f"""申し訳ございませんが、{selected_date}の予約可能な時間帯では、{service_name}（{duration_str}）の予約ができません。
 
 📅 選択した日付：{selected_date}
 💇 選択したサービス：{service_name}（{duration_str}）
@@ -548,7 +548,7 @@ class ReservationFlow:
             period_strings.append(f"・{start_time}~{end_time}")
         
         return f"""{selected_date}ですね！
-空いている時間帯は以下の通りです：
+予約可能な時間帯は以下の通りです：
 
 {chr(10).join(period_strings)}
 
@@ -667,7 +667,7 @@ class ReservationFlow:
 ・10時
 ・10時30分
 
-{selected_date}の空いている時間帯：
+{selected_date}の予約可能な時間帯：
 {chr(10).join(period_strings)}
 
 上記の空き時間から開始時間をお選びください。
@@ -725,7 +725,7 @@ class ReservationFlow:
             
             return f"""申し訳ございませんが、{start_time}から{required_duration}分の予約は空いていません。
 
-{selected_date}の空いている時間帯：
+{selected_date}の予約可能な時間帯：
 {chr(10).join(period_strings)}
 
 上記の空き時間からお選びください。
@@ -756,7 +756,7 @@ class ReservationFlow:
 
 お客様は同じ時間帯に複数のご予約をお取りいただけません。
 
-{selected_date}の空いている時間帯は以下の通りです：
+{selected_date}の予約可能な時間帯は以下の通りです：
 
 {chr(10).join(period_strings)}
 
