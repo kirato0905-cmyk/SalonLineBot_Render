@@ -653,12 +653,22 @@ class ReservationFlow:
         try:
             available_slots = self._get_available_slots(selected_date, staff_name)
             available_periods = [slot for slot in available_slots if slot["available"]]
-            
-            # Debug logging
-            print(f"[Time Selection] Available slots for {selected_date}: {len(available_slots)}")
-            print(f"[Time Selection] Available periods: {len(available_periods)}")
+
+            # Get service duration
+            service_name = self.user_states[user_id]["data"].get("service")
+            service_info = {}
+            for service_id, service_data in self.services.items():
+                if service_data.get("name") == service_name:
+                    service_info = service_data
+                    break
+            service_duration = service_info.get("duration", 60)  # Default to 60 minutes
+
+            # Filter only periods where service fits
+            filtered_periods = []
             for period in available_periods:
-                print(f"  {period['time']} - {period['end_time']}")
+                slot_duration = self._calculate_time_duration_minutes(period["time"], period["end_time"])
+                if slot_duration >= service_duration:
+                    filtered_periods.append(period)
                 
         except Exception as e:
             logging.error(f"Error getting available slots: {e}")
@@ -670,7 +680,7 @@ class ReservationFlow:
         if not start_time:
             # Show available periods in error message
             period_strings = []
-            for period in available_periods:
+            for period in filtered_periods:
                 period_start = period["time"]
                 period_end = period["end_time"]
                 period_strings.append(f"・{period_start}~{period_end}")
