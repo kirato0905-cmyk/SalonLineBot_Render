@@ -192,8 +192,10 @@ def handle_message(event: MessageEvent):
         # Handle FAQ menu and answers
         if message_text == "よくある質問":
             try:
+                print(f"User {user_id} requested FAQ menu")
                 send_faq_menu(event.reply_token, configuration)
                 action_type = "faq_menu"
+                print(f"FAQ menu sent successfully to user {user_id}")
                 # Log FAQ menu access
                 if sheets_logger:
                     sheets_logger.log_message(
@@ -207,12 +209,26 @@ def handle_message(event: MessageEvent):
                     )
                 return
             except Exception as e:
-                logging.error(f"Failed to send FAQ menu: {e}")
+                logging.error(f"Failed to send FAQ menu: {e}", exc_info=True)
+                # Send error message to user
+                try:
+                    with ApiClient(configuration) as api_client:
+                        MessagingApi(api_client).reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="申し訳ございませんが、よくある質問の表示中にエラーが発生しました。しばらくしてから再度お試しください。")]
+                            )
+                        )
+                except Exception as reply_error:
+                    logging.error(f"Failed to send error message: {reply_error}")
+                return
         elif message_text.startswith("FAQ:"):
             try:
                 question = message_text.replace("FAQ:", "")
+                print(f"User {user_id} requested FAQ answer for: {question}")
                 send_faq_answer(event.reply_token, question, configuration)
                 action_type = "faq_answer"
+                print(f"FAQ answer sent successfully to user {user_id}")
                 # Log FAQ answer access
                 if sheets_logger:
                     sheets_logger.log_message(
@@ -226,7 +242,19 @@ def handle_message(event: MessageEvent):
                     )
                 return
             except Exception as e:
-                logging.error(f"Failed to send FAQ answer: {e}")
+                logging.error(f"Failed to send FAQ answer: {e}", exc_info=True)
+                # Send error message to user
+                try:
+                    with ApiClient(configuration) as api_client:
+                        MessagingApi(api_client).reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="申し訳ございませんが、よくある質問の回答表示中にエラーが発生しました。しばらくしてから再度お試しください。")]
+                            )
+                        )
+                except Exception as reply_error:
+                    logging.error(f"Failed to send error message: {reply_error}")
+                return
 
         # Special ping-pong test
         if message_text == "ping":
