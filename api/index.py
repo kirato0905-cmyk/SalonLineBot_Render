@@ -489,6 +489,9 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
             from api.user_consent_manager import user_consent_manager
             user_consent_manager.mark_user_consented(user_id)
             print(f"User consented: {user_id} ({user_name})")
+
+            # FAQメニューも送信
+            send_faq_menu(reply_token, configuration)
             
         elif message_text == "同意しない":
             # User declined - send goodbye message
