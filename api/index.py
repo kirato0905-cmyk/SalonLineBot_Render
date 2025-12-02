@@ -188,14 +188,7 @@ def handle_message(event: MessageEvent):
             return handle_consent_screen(user_id, user_name, event.reply_token)
         elif message_text in ["同意する", "同意しない"]:
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
-        
-        # FAQフロー（同意済みユーザーのみ）
-        if message_text == "よくある質問":
-            return send_faq_menu(event.reply_token, configuration)
-        elif message_text.startswith("FAQ:"):
-            question = message_text.replace("FAQ:", "")
-            return send_faq_answer(event.reply_token, question, configuration)
-        
+
         # Special ping-pong test
         if message_text == "ping":
             reply = "pong"
@@ -490,8 +483,12 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
             user_consent_manager.mark_user_consented(user_id)
             print(f"User consented: {user_id} ({user_name})")
 
-            # FAQメニューも送信
-            send_faq_menu(reply_token, configuration)
+            # FAQフロー（同意済みユーザーのみ）
+            if message_text == "よくある質問":
+                return send_faq_menu(event.reply_token, configuration)
+            elif message_text.startswith("FAQ:"):
+                question = message_text.replace("FAQ:", "")
+                return send_faq_answer(event.reply_token, question, configuration)        
             
         elif message_text == "同意しない":
             # User declined - send goodbye message
