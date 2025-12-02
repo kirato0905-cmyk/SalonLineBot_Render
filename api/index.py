@@ -189,6 +189,45 @@ def handle_message(event: MessageEvent):
         elif message_text in ["同意する", "同意しない"]:
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
 
+        # Handle FAQ menu and answers
+        if message_text == "よくある質問":
+            try:
+                send_faq_menu(event.reply_token, configuration)
+                action_type = "faq_menu"
+                # Log FAQ menu access
+                if sheets_logger:
+                    sheets_logger.log_message(
+                        user_id=user_id,
+                        user_message=message_text,
+                        bot_response="FAQ menu displayed",
+                        user_name=user_name,
+                        message_type="text",
+                        action_type=action_type,
+                        processing_time=(time.time() - start_time) * 1000
+                    )
+                return
+            except Exception as e:
+                logging.error(f"Failed to send FAQ menu: {e}")
+        elif message_text.startswith("FAQ:"):
+            try:
+                question = message_text.replace("FAQ:", "")
+                send_faq_answer(event.reply_token, question, configuration)
+                action_type = "faq_answer"
+                # Log FAQ answer access
+                if sheets_logger:
+                    sheets_logger.log_message(
+                        user_id=user_id,
+                        user_message=message_text,
+                        bot_response=f"FAQ answer for: {question}",
+                        user_name=user_name,
+                        message_type="text",
+                        action_type=action_type,
+                        processing_time=(time.time() - start_time) * 1000
+                    )
+                return
+            except Exception as e:
+                logging.error(f"Failed to send FAQ answer: {e}")
+
         # Special ping-pong test
         if message_text == "ping":
             reply = "pong"
@@ -482,13 +521,6 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
             from api.user_consent_manager import user_consent_manager
             user_consent_manager.mark_user_consented(user_id)
             print(f"User consented: {user_id} ({user_name})")
-
-            # FAQフロー（同意済みユーザーのみ）
-            if message_text == "よくある質問":
-                return send_faq_menu(event.reply_token, configuration)
-            elif message_text.startswith("FAQ:"):
-                question = message_text.replace("FAQ:", "")
-                return send_faq_answer(event.reply_token, question, configuration)        
             
         elif message_text == "同意しない":
             # User declined - send goodbye message

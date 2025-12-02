@@ -10,7 +10,7 @@ def send_faq_menu(reply_token, configuration):
         MessageAction(label=faq["question"], text=f"FAQ:{faq['question']}")
         for faq in faq_list
     ]
-    actions = actions[:10]  # ButtonsTemplateは最大4件
+    actions = actions[:10]  # ButtonsTemplateは最大10件
     faq_menu = TemplateMessage(
         alt_text="よくある質問一覧",
         template=ButtonsTemplate(
