@@ -136,7 +136,7 @@ def handle_message(event: MessageEvent):
         user_name = "Unknown"
     
     # Check if user has consented (except for consent-related messages)
-    if message_text not in ["同意画面を開く", "同意する", "同意しない"]:
+    if message_text not in ["同意画面を開く", "同意する", "同意しない", "よくある質問"]:
         try:
             from api.user_consent_manager import user_consent_manager
             if not user_consent_manager.has_user_consented(user_id):
