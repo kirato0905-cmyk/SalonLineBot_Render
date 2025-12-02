@@ -1,7 +1,16 @@
 import os
 import json
 import logging
-from linebot.v3.messaging import TemplateMessage, ButtonsTemplate, MessageAction, ReplyMessageRequest, TextMessage, MessagingApi, ApiClient
+from linebot.v3.messaging import (
+    TemplateMessage, CarouselTemplate, CarouselColumn, MessageAction,
+    ReplyMessageRequest, TextMessage, MessagingApi, ApiClient
+)
+
+def truncate_label(label, max_length=20):
+    """ラベルを最大文字数に制限（20文字以内）"""
+    if len(label) <= max_length:
+        return label
+    return label[:max_length-1] + "…"
 
 def send_faq_menu(reply_token, configuration):
     try:
@@ -17,25 +26,50 @@ def send_faq_menu(reply_token, configuration):
         if not faq_list or len(faq_list) == 0:
             raise ValueError("FAQ list is empty")
         
+        # 最大10個のFAQを表示
+        faq_list = faq_list[:10]
         print(f"Loaded {len(faq_list)} FAQ items")
         
-        actions = [
-            MessageAction(label=faq["question"], text=f"FAQ:{faq['question']}")
-            for faq in faq_list
-        ]
-        actions = actions[:10]  # ButtonsTemplateは最大10件
+        # CarouselTemplate用にカラムを作成
+        # 各カラムに最大3個のボタンを配置
+        columns = []
+        items_per_column = 3
         
-        if not actions or len(actions) == 0:
-            raise ValueError("No FAQ actions created")
+        for i in range(0, len(faq_list), items_per_column):
+            column_faqs = faq_list[i:i+items_per_column]
+            actions = []
+            
+            for faq in column_faqs:
+                # ラベルを20文字以内に制限
+                label = truncate_label(faq["question"])
+                actions.append(
+                    MessageAction(
+                        label=label,
+                        text=f"FAQ:{faq['question']}"
+                    )
+                )
+            
+            # カラムを作成（titleとtextは省略可能）
+            columns.append(
+                CarouselColumn(
+                    text="よくある質問はこちらです：",
+                    actions=actions
+                )
+            )
         
-        print(f"Created {len(actions)} FAQ actions")
+        if not columns or len(columns) == 0:
+            raise ValueError("No FAQ columns created")
+        
+        print(f"Created {len(columns)} carousel columns with {len(faq_list)} total FAQ items")
+        
+        # CarouselTemplateは最大10個のカラムまで
+        if len(columns) > 10:
+            columns = columns[:10]
+            print(f"Limited to 10 columns (LINE API limit)")
         
         faq_menu = TemplateMessage(
             alt_text="よくある質問一覧",
-            template=ButtonsTemplate(
-                text="よくある質問はこちらです：",
-                actions=actions
-            )
+            template=CarouselTemplate(columns=columns)
         )
         
         with ApiClient(configuration) as api_client:
