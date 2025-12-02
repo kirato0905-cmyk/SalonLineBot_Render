@@ -2,6 +2,7 @@ import os
 import logging
 import time
 import threading
+import json
 from fastapi import FastAPI, Request, Header, HTTPException
 from dotenv import load_dotenv
 from linebot.v3 import WebhookHandler
@@ -186,6 +187,13 @@ def handle_message(event: MessageEvent):
             return handle_consent_screen(user_id, user_name, event.reply_token)
         elif message_text in ["同意する", "同意しない"]:
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
+        
+        # FAQフロー
+        if message_text == "よくある質問":
+            return send_faq_menu(event.reply_token)
+        elif message_text.startswith("FAQ:"):
+            question = message_text.replace("FAQ:", "")
+            return send_faq_answer(event.reply_token, question)
         
         # Special ping-pong test
         if message_text == "ping":
@@ -504,4 +512,58 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
         
     except Exception as e:
         logging.error(f"Failed to handle consent response: {e}")
+
+def send_faq_menu(reply_token):
+    # FAQメニューをJSONから読み込み
+    faq_path = os.path.join(os.path.dirname(__file__), "data", "faq.json")
+    with open(faq_path, encoding="utf-8") as f:
+        faq_list = json.load(f)
+    
+    # ButtonsTemplateは最大4つまでなので、複数ページに分ける場合はCarouselTemplate推奨
+    # ここでは10件を1ページで表示（LINE仕様で最大4件までなので、4件ずつ分割も可）
+    actions = [
+        MessageAction(label=faq["question"], text=f"FAQ:{faq['question']}")
+        for faq in faq_list
+    ]
+    # 4件までしか表示できない場合は、最初の4件のみ
+    actions = actions[:4]
+
+    faq_menu = TemplateMessage(
+        alt_text="よくある質問一覧",
+        template=ButtonsTemplate(
+            text="よくある質問はこちらです：",
+            actions=actions
+        )
+    )
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[faq_menu]
+            )
+        )
+
+def send_faq_answer(reply_token, question):
+    faq_path = os.path.join(os.path.dirname(__file__), "data", "faq.json")
+    with open(faq_path, encoding="utf-8") as f:
+        faq_list = json.load(f)
+    answer = next((faq["answer"] for faq in faq_list if faq["question"] == question), "申し訳ありません、その質問は見つかりませんでした。")
+    
+    # 「他のよくある質問も見る」ボタン
+    back_button = TemplateMessage(
+        alt_text="他のよくある質問も見る",
+        template=ButtonsTemplate(
+            text="他のよくある質問も見る場合はこちら",
+            actions=[
+                MessageAction(label="よくある質問一覧へ戻る", text="よくある質問")
+            ]
+        )
+    )
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text=answer), back_button]
+            )
+        )
 
