@@ -34,7 +34,7 @@ def send_faq_menu(reply_token, configuration):
             lines.append(f"{idx}. {faq['question']}")
 
         lines.append("")
-        lines.append("※質問番号（1〜10）を送信するか、質問の文章をそのまま送信してください。")
+        lines.append("※質問番号（1～10）をお送りください。")
 
         faq_menu_message = TextMessage(text="\n".join(lines))
  
