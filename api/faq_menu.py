@@ -30,8 +30,7 @@ def send_faq_menu(reply_token, configuration):
         faq_list = faq_list[:10]
         print(f"Loaded {len(faq_list)} FAQ items")
         
-        # CarouselTemplate用にカラムを作成
-        # 各カラムに最大3個のボタンを配置
+        # 3件ずつ分割、各カラム3件に揃える
         columns = []
         items_per_column = 3
         
@@ -40,32 +39,32 @@ def send_faq_menu(reply_token, configuration):
             actions = []
             
             for faq in column_faqs:
-                # ラベルを20文字以内に制限
-                label = truncate_label(faq["question"])
                 actions.append(
                     MessageAction(
-                        label=label,
+                        label=truncate_label(faq["question"]),
                         text=f"FAQ:{faq['question']}"
                     )
                 )
             
-            # カラムを作成（titleとtextは省略可能）
+            # 足りない分はダミーで埋める
+            while len(actions) < items_per_column:
+                actions.append(
+                    MessageAction(
+                        label="（選択不可）",
+                        text="-"  # 何も起きない
+                    )
+                )
+            
+            # titleとtextは必須
             columns.append(
                 CarouselColumn(
-                    text="よくある質問はこちらです：",
+                    title="よくある質問",
+                    text="質問を選択してください",
                     actions=actions
                 )
             )
         
-        if not columns or len(columns) == 0:
-            raise ValueError("No FAQ columns created")
-        
         print(f"Created {len(columns)} carousel columns with {len(faq_list)} total FAQ items")
-        
-        # CarouselTemplateは最大10個のカラムまで
-        if len(columns) > 10:
-            columns = columns[:10]
-            print(f"Limited to 10 columns (LINE API limit)")
         
         faq_menu = TemplateMessage(
             alt_text="よくある質問一覧",
