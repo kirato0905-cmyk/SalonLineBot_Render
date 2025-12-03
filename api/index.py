@@ -14,7 +14,7 @@ from api.chatgpt_faq import ChatGPTFAQ
 from api.reservation_flow import ReservationFlow
 from api.google_sheets_logger import GoogleSheetsLogger
 from api.reminder_scheduler import reminder_scheduler
-from api.faq_menu import send_faq_menu, send_faq_answer
+from api.faq_menu import send_faq_menu, send_faq_answer, send_faq_answer_by_item, get_faq_by_number
 
 load_dotenv()
 
@@ -222,27 +222,51 @@ def handle_message(event: MessageEvent):
                 except Exception as reply_error:
                     logging.error(f"Failed to send error message: {reply_error}")
                 return
-        elif message_text.startswith("FAQ:"):
+        elif message_text.isdigit():
+            # Handle FAQ number input (1-10)
             try:
-                question = message_text.replace("FAQ:", "")
-                print(f"User {user_id} requested FAQ answer for: {question}")
-                send_faq_answer(event.reply_token, question, configuration)
-                action_type = "faq_answer"
-                print(f"FAQ answer sent successfully to user {user_id}")
-                # Log FAQ answer access
-                if sheets_logger:
-                    sheets_logger.log_message(
-                        user_id=user_id,
-                        user_message=message_text,
-                        bot_response=f"FAQ answer for: {question}",
-                        user_name=user_name,
-                        message_type="text",
-                        action_type=action_type,
-                        processing_time=(time.time() - start_time) * 1000
-                    )
-                return
+                faq_number = int(message_text)
+                if 1 <= faq_number <= 10:
+                    faq_item = get_faq_by_number(faq_number)
+                    if faq_item and "answer" in faq_item:
+                        # Use the answer directly from faq.json (already loaded)
+                        send_faq_answer_by_item(event.reply_token, faq_item, configuration)
+                        action_type = "faq_answer"
+                        print(f"FAQ answer sent successfully for number {faq_number} to user {user_id}")
+                        # Log FAQ answer access
+                        if sheets_logger:
+                            sheets_logger.log_message(
+                                user_id=user_id,
+                                user_message=message_text,
+                                bot_response=f"FAQ answer for: {faq_item['question']}",
+                                user_name=user_name,
+                                message_type="text",
+                                action_type=action_type,
+                                processing_time=(time.time() - start_time) * 1000
+                            )
+                        return
+                    else:
+                        # FAQ not found for this number
+                        with ApiClient(configuration) as api_client:
+                            MessagingApi(api_client).reply_message(
+                                ReplyMessageRequest(
+                                    reply_token=event.reply_token,
+                                    messages=[TextMessage(text="申し訳ございませんが、その番号の質問は見つかりませんでした。")]
+                                )
+                            )
+                        return
+                else:
+                    # Number out of range
+                    with ApiClient(configuration) as api_client:
+                        MessagingApi(api_client).reply_message(
+                            ReplyMessageRequest(
+                                reply_token=event.reply_token,
+                                messages=[TextMessage(text="質問番号は1〜10の範囲で入力してください。")]
+                            )
+                        )
+                    return
             except Exception as e:
-                logging.error(f"Failed to send FAQ answer: {e}", exc_info=True)
+                logging.error(f"Failed to handle FAQ number: {e}", exc_info=True)
                 # Send error message to user
                 try:
                     with ApiClient(configuration) as api_client:
