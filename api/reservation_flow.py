@@ -94,6 +94,24 @@ class ReservationFlow:
             if service_data.get("name") == service_name:
                 return service_id
         return service_name
+
+    def _resolve_service_name(self, identifier: str) -> Optional[str]:
+        """Resolve a service identifier (id, key, or name) to a canonical service name."""
+        if not identifier:
+            return None
+
+        normalized = identifier.strip()
+        if normalized in self.services:
+            return self.services[normalized].get("name", normalized)
+
+        for service in self.services.values():
+            service_id = service.get("id")
+            service_name = service.get("name")
+            if service_id and service_id.lower() == normalized.lower():
+                return service_name
+            if service_name and service_name.lower() == normalized.lower():
+                return service_name
+        return None
     
     def _get_staff_id_by_name(self, staff_name: str) -> str:
         """Get staff ID by name"""
@@ -292,6 +310,22 @@ class ReservationFlow:
 サービス名をお送りください。
 
 ※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
+
+    def start_reservation_with_service(self, user_id: str, service_identifier: str) -> str:
+        """Start a reservation flow with a preselected service (e.g., from a Flex postback)."""
+        service_name = self._resolve_service_name(service_identifier)
+        if not service_name:
+            return "申し訳ございませんが、選択されたメニューは現在ご用意がありません。"
+
+        self.user_states[user_id] = {
+            "step": "service_selection",
+            "data": {
+                "user_id": user_id
+            }
+        }
+
+        # Reuse the standard handler by sending the resolved service name as input
+        return self._handle_service_selection(user_id, service_name)
     
     def _handle_service_selection(self, user_id: str, message: str) -> str:
         """Handle service selection"""

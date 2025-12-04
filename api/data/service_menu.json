@@ -1,0 +1,41 @@
+{
+  "services": [
+    {
+      "id": "cut",
+      "name": "カット",
+      "description": "骨格や髪質に合わせて丁寧にデザインするスタンダードカットです。",
+      "duration": 60,
+      "price": 5500,
+      "image_url": "https://images.unsplash.com/photo-1504593811423-6dd665756598",
+      "cta_label": "カットで予約する"
+    },
+    {
+      "id": "color",
+      "name": "カラー",
+      "description": "艶と透明感を引き出す似合わせカラー。ダメージケアもセットです。",
+      "duration": 120,
+      "price": 9800,
+      "image_url": "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f",
+      "cta_label": "カラーで予約する"
+    },
+    {
+      "id": "perm",
+      "name": "パーマ",
+      "description": "柔らかな質感と動きを長持ちさせるデジタルパーマコース。",
+      "duration": 150,
+      "price": 13200,
+      "image_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d",
+      "cta_label": "パーマで予約する"
+    },
+    {
+      "id": "treatment",
+      "name": "トリートメント",
+      "description": "内部補修から保湿まで行う集中ケアトリートメント。",
+      "duration": 90,
+      "price": 6600,
+      "image_url": "https://images.unsplash.com/photo-1519415494728-1036e6a67cd7",
+      "cta_label": "トリートメントで予約"
+    }
+  ]
+}
+

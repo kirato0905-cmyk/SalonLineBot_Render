@@ -3,18 +3,20 @@ import logging
 import time
 import threading
 import json
+from urllib.parse import parse_qs
 from fastapi import FastAPI, Request, Header, HTTPException
 from dotenv import load_dotenv
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage, TemplateMessage, ButtonsTemplate, MessageAction
-from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 from api.rag_faq import RAGFAQ
 from api.chatgpt_faq import ChatGPTFAQ
 from api.reservation_flow import ReservationFlow
 from api.google_sheets_logger import GoogleSheetsLogger
 from api.reminder_scheduler import reminder_scheduler
 from api.faq_menu import send_faq_menu, send_faq_answer, send_faq_answer_by_item, get_faq_by_number
+from api.service_menu import send_service_menu
 
 load_dotenv()
 
@@ -188,6 +190,34 @@ def handle_message(event: MessageEvent):
             return handle_consent_screen(user_id, user_name, event.reply_token)
         elif message_text in ["同意する", "同意しない"]:
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
+
+        # Handle service list request
+        service_menu_keywords = ["サービス一覧", "サービスメニュー", "メニューを見る", "メニュー"]
+        if message_text in service_menu_keywords:
+            try:
+                send_service_menu(event.reply_token, configuration)
+                action_type = "service_menu"
+                if sheets_logger:
+                    sheets_logger.log_message(
+                        user_id=user_id,
+                        user_message=message_text,
+                        bot_response="Service menu displayed",
+                        user_name=user_name,
+                        message_type="flex",
+                        action_type=action_type,
+                        processing_time=(time.time() - start_time) * 1000
+                    )
+                return
+            except Exception as e:
+                logging.error(f"Failed to send service menu: {e}", exc_info=True)
+                with ApiClient(configuration) as api_client:
+                    MessagingApi(api_client).reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text="現在サービス一覧を表示できません。しばらくしてから再度お試しください。")]
+                        )
+                    )
+                return
 
         # Handle FAQ menu and answers
         if message_text == "よくある質問":
@@ -411,6 +441,79 @@ def handle_message(event: MessageEvent):
             )
     else:
         logging.warning(f"Sheets logger is None - cannot log interaction for user {user_id}")
+
+@handler.add(PostbackEvent)
+def handle_postback(event: PostbackEvent):
+    """Handle postback events such as Flex button taps."""
+    start_time = time.time()
+    user_id = event.source.user_id
+    postback_data = event.postback.data or ""
+    params = parse_qs(postback_data)
+    action = params.get("action", [None])[0]
+    reply_text = ""
+    action_type = "postback"
+
+    # Fetch user display name for logging
+    try:
+        with ApiClient(configuration) as api_client:
+            profile = MessagingApi(api_client).get_profile(user_id)
+            user_name = profile.display_name
+    except Exception as e:
+        logging.warning(f"Could not fetch user profile for postback {user_id}: {e}")
+        user_name = "Unknown"
+
+    if action == "select_service":
+        service_id = params.get("service_id", [None])[0]
+        if reservation_flow:
+            try:
+                reply_text = reservation_flow.start_reservation_with_service(user_id, service_id)
+                action_type = "reservation"
+            except Exception as e:
+                logging.error(f"Failed to start reservation from postback: {e}", exc_info=True)
+                reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
+                action_type = "error"
+        else:
+            reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
+            action_type = "system_error"
+    else:
+        reply_text = "選択内容を処理できませんでした。"
+
+    # Send reply
+    try:
+        with ApiClient(configuration) as api_client:
+            MessagingApi(api_client).reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=reply_text)]
+                )
+            )
+    except Exception as e:
+        logging.error(f"LINE reply error (postback): {e}")
+        if sheets_logger:
+            sheets_logger.log_error(
+                user_id=user_id,
+                error_message=str(e),
+                user_name=user_name,
+                user_message=f"[postback] {postback_data}",
+                bot_response="Error occurred"
+            )
+        return
+
+    # Log interaction
+    processing_time = (time.time() - start_time) * 1000
+    if sheets_logger:
+        sheets_logger.log_message(
+            user_id=user_id,
+            user_message=f"[postback] {postback_data}",
+            bot_response=reply_text,
+            user_name=user_name,
+            message_type="postback",
+            action_type=action_type,
+            processing_time=processing_time
+        )
+    else:
+        logging.warning(f"Sheets logger is None - cannot log postback for user {user_id}")
+
 
 @handler.add(FollowEvent)
 def handle_follow(event: FollowEvent):
