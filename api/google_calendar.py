@@ -16,7 +16,8 @@ from dotenv import load_dotenv
 class GoogleCalendarHelper:
     def __init__(self):
         load_dotenv()
-        self.calendar_id = os.getenv("GOOGLE_CALENDAR_ID")
+        # Remove this line:
+        # self.calendar_id = os.getenv("GOOGLE_CALENDAR_ID")
         self.timezone = os.getenv("GOOGLE_CALENDAR_TIMEZONE", "Asia/Tokyo")
         self.service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
         
@@ -25,6 +26,9 @@ class GoogleCalendarHelper:
         self.staff_data = self.services_data.get("staff", {})
         self.services = self.services_data.get("services", {})
         
+        # Optionally, set a fallback calendar_id if needed
+        self.calendar_id = None
+
         # Initialize Google Calendar service
         self.service = None
         try:
@@ -990,23 +994,17 @@ class GoogleCalendarHelper:
         return None
     
     def _get_staff_calendar_id(self, staff_name: str) -> Optional[str]:
-        """Get staff calendar ID from mapping. Returns None if not found or staff is '未指定'."""
+        """Get staff calendar ID from services.json. Returns None if not found or staff is '未指定'."""
         if not staff_name or staff_name == "未指定":
-            # Use default calendar for unspecified staff
-            return self.calendar_id
-        
-        # Find staff by name in the staff data
+            return self.calendar_id  # fallback if needed
+
         for staff_id, staff_data in self.staff_data.items():
             if staff_data.get("name") == staff_name:
-                calendar_id_env = staff_data.get("calendar_id")
-                if calendar_id_env:
-                    # Get calendar ID from environment variable
-                    calendar_id = os.getenv(calendar_id_env)
-                    if calendar_id:
-                        return calendar_id
+                calendar_id = staff_data.get("calendar_id")
+                if calendar_id:
+                    return calendar_id  # Use directly from JSON
                 break
-        
-        # Fallback to default calendar if staff calendar not found
+
         print(f"Warning: Calendar ID not found for staff '{staff_name}', using default calendar")
         return self.calendar_id
     
