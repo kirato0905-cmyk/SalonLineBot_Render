@@ -19,7 +19,7 @@ from linebot.v3.messaging import (
 )
 
 SERVICE_MENU_FILE = os.path.join(os.path.dirname(__file__), "data", "service_menu.json")
-DEFAULT_IMAGE = "https://images.unsplash.com/photo-1504593811423-6dd665756598"
+DEFAULT_IMAGE = "https://img.icons8.com/?size=48&id=12245&format=png"
 
 
 def _load_services() -> List[Dict]:
