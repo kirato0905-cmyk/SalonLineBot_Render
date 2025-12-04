@@ -130,7 +130,7 @@ class GoogleCalendarHelper:
         Returns:
             bool: True if successful, False otherwise
         """
-        if not self.service or not self.calendar_id:
+        if not self.service:
             print("Google Calendar not configured, skipping event creation")
             return False
         
@@ -139,6 +139,12 @@ class GoogleCalendarHelper:
             date_str = reservation_data['date']
             service = reservation_data['service']
             staff = reservation_data['staff']
+            
+            # Get staff-specific calendar ID
+            staff_calendar_id = self._get_staff_calendar_id(staff)
+            if not staff_calendar_id:
+                print(f"Staff calendar ID not found for {staff}, skipping event creation")
+                return False
             
             # Handle both single time and time range
             if 'start_time' in reservation_data and 'end_time' in reservation_data:
@@ -207,9 +213,9 @@ class GoogleCalendarHelper:
                 if staff_email:
                     event['attendees'] = [{'email': staff_email}]
             
-            # Create the event
+            # Create the event in staff-specific calendar
             created_event = self.service.events().insert(
-                calendarId=self.calendar_id,
+                calendarId=staff_calendar_id,
                 body=event
             ).execute()
             
@@ -324,14 +330,32 @@ class GoogleCalendarHelper:
         """Update the start/end time for a reservation by its ID.
 
         If new_service is provided, adjust duration by that service and update summary.
-        If new_staff is provided, update summary staff name.
+        If new_staff is provided, update summary staff name and move to new staff's calendar.
         Otherwise preserve the original duration.
         """
         try:
-            # Find the event by reservation ID
-            event = self.get_reservation_by_id(reservation_id)
+            # Find the event by reservation ID (search in all calendars if staff not specified)
+            event = self.get_reservation_by_id(reservation_id, new_staff)
             if not event:
                 print(f"Reservation {reservation_id} not found")
+                return False
+            
+            # Extract staff name from event summary if not provided
+            if not new_staff:
+                summary = event.get('summary', '')
+                try:
+                    import re
+                    m = re.search(r"^\[予約\] (.+) - (.+) \((.+)\)$", summary)
+                    if m:
+                        current_staff = m.group(3)
+                        new_staff = current_staff
+                except Exception:
+                    pass
+            
+            # Get staff-specific calendar ID
+            staff_calendar_id = self._get_staff_calendar_id(new_staff) if new_staff else self.calendar_id
+            if not staff_calendar_id:
+                print(f"Staff calendar ID not found for {new_staff}")
                 return False
 
             # Extract current event details
@@ -408,8 +432,44 @@ class GoogleCalendarHelper:
                 if new_staff_color_id:
                     event['colorId'] = new_staff_color_id
 
+            # If staff changed, we need to delete from old calendar and create in new calendar
+            if new_staff:
+                # Extract current staff from event summary
+                summary = event.get('summary', '')
+                current_staff = None
+                try:
+                    import re
+                    m = re.search(r"^\[予約\] (.+) - (.+) \((.+)\)$", summary)
+                    if m:
+                        current_staff = m.group(3)
+                except Exception:
+                    pass
+                
+                # If staff changed, move event to new calendar
+                if current_staff and current_staff != new_staff:
+                    current_calendar_id = self._get_staff_calendar_id(current_staff)
+                    if current_calendar_id and current_calendar_id != staff_calendar_id:
+                        # Delete from old calendar
+                        try:
+                            self.service.events().delete(
+                                calendarId=current_calendar_id,
+                                eventId=event['id']
+                            ).execute()
+                            print(f"Moved reservation from {current_staff}'s calendar to {new_staff}'s calendar")
+                        except Exception as e:
+                            print(f"Warning: Failed to delete from old calendar: {e}")
+                        
+                        # Create in new calendar (event will be recreated with new ID)
+                        created_event = self.service.events().insert(
+                            calendarId=staff_calendar_id,
+                            body=event
+                        ).execute()
+                        print(f"Successfully moved reservation {reservation_id} to {new_staff}'s calendar")
+                        return True
+            
+            # Update in staff-specific calendar
             updated = self.service.events().update(
-                calendarId=self.calendar_id,
+                calendarId=staff_calendar_id,
                 eventId=event['id'],
                 body=event
             ).execute()
@@ -422,25 +482,29 @@ class GoogleCalendarHelper:
             print(f"Failed to modify reservation time for {reservation_id}: {e}")
             return False
     
-    def get_available_slots(self, start_date: datetime, end_date: datetime) -> list:
+    def get_available_slots(self, start_date: datetime, end_date: datetime, staff_name: str = None) -> list:
         """
         Get available time slots from Google Calendar
         
         Args:
             start_date: Start date to check availability
             end_date: End date to check availability
+            staff_name: Optional staff name to get slots from staff-specific calendar
             
         Returns:
             list: List of available time slots
         """
-        if not self.service or not self.calendar_id:
+        # Get staff-specific calendar ID if staff_name is provided
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        
+        if not self.service or not calendar_id:
             print("Google Calendar not configured, using fallback slots")
             return self._generate_fallback_slots(start_date, end_date)
         
         try:
-            # Get events from calendar
+            # Get events from staff-specific calendar
             events_result = self.service.events().list(
-                calendarId=self.calendar_id,
+                calendarId=calendar_id,
                 timeMin=start_date.isoformat() + 'Z',
                 timeMax=end_date.isoformat() + 'Z',
                 singleEvents=True,
@@ -625,9 +689,12 @@ class GoogleCalendarHelper:
         # Short calendar URL with minimal parameters
         return f"https://calendar.google.com/calendar/embed?src={self.calendar_id}&ctz=Asia%2FTokyo"
     
-    def get_events_for_date(self, date_str: str) -> List[Dict]:
-        """Get all events for a specific date (timezone-aware)"""
-        if not self.service or not self.calendar_id:
+    def get_events_for_date(self, date_str: str, staff_name: str = None) -> List[Dict]:
+        """Get all events for a specific date (timezone-aware) from staff-specific calendar"""
+        # Get staff-specific calendar ID if staff_name is provided
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        
+        if not self.service or not calendar_id:
             return []
         
         try:
@@ -641,10 +708,10 @@ class GoogleCalendarHelper:
             # Get end of day (next day 00:00:00 Tokyo time)
             end_date_aware = start_date_aware + timedelta(days=1)
             
-            print(f"[Get Events] Fetching events from {start_date_aware.isoformat()} to {end_date_aware.isoformat()}")
+            print(f"[Get Events] Fetching events from {start_date_aware.isoformat()} to {end_date_aware.isoformat()} (Calendar: {calendar_id})")
             
             events_result = self.service.events().list(
-                calendarId=self.calendar_id,
+                calendarId=calendar_id,
                 timeMin=start_date_aware.isoformat(),
                 timeMax=end_date_aware.isoformat(),
                 singleEvents=True,
@@ -664,15 +731,18 @@ class GoogleCalendarHelper:
         Get available slots for modification - INCLUDES the user's current reservation time,
         EXCLUDES other reservations for the same staff member
         """
-        if not self.service or not self.calendar_id:
+        # Get staff-specific calendar ID
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        
+        if not self.service or not calendar_id:
             return self._generate_fallback_slots(
                 datetime.strptime(date_str, "%Y-%m-%d"),
                 datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)
             )
         
         try:
-            # Get all events for the date
-            all_events = self.get_events_for_date(date_str)
+            # Get all events for the date from staff-specific calendar
+            all_events = self.get_events_for_date(date_str, staff_name)
             print(f"[Modification] Date: {date_str}, Total events: {len(all_events)}, Current Reservation ID: {exclude_reservation_id}, Staff: {staff_name}")
             
             # Filter events by staff if staff_name is provided
@@ -789,44 +859,115 @@ class GoogleCalendarHelper:
         
         return False
     
-    def get_reservation_by_id(self, reservation_id: str) -> Optional[Dict]:
-        """Get reservation details by reservation ID"""
-        try:
-            # Search for events with the reservation ID in the description
-            events_result = self.service.events().list(
-                calendarId=self.calendar_id,
-                timeMin=datetime.now().isoformat() + 'Z',
-                maxResults=100,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
-            
-            events = events_result.get('items', [])
-            
-            for event in events:
-                description = event.get('description', '')
-                if reservation_id in description:
-                    return event
-            
+    def get_reservation_by_id(self, reservation_id: str, staff_name: str = None) -> Optional[Dict]:
+        """Get reservation details by reservation ID from staff-specific calendar"""
+        if not self.service:
             return None
+        
+        try:
+            # If staff_name is provided, search only in that staff's calendar
+            if staff_name:
+                calendar_id = self._get_staff_calendar_id(staff_name)
+                if not calendar_id:
+                    print(f"Staff calendar ID not found for {staff_name}")
+                    return None
+                
+                events_result = self.service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=datetime.now().isoformat() + 'Z',
+                    maxResults=100,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                for event in events:
+                    description = event.get('description', '')
+                    if reservation_id in description:
+                        return event
+                
+                return None
+            else:
+                # Search in all staff calendars (fallback for backward compatibility)
+                # First, try default calendar
+                if self.calendar_id:
+                    events_result = self.service.events().list(
+                        calendarId=self.calendar_id,
+                        timeMin=datetime.now().isoformat() + 'Z',
+                        maxResults=100,
+                        singleEvents=True,
+                        orderBy='startTime'
+                    ).execute()
+                    
+                    events = events_result.get('items', [])
+                    
+                    for event in events:
+                        description = event.get('description', '')
+                        if reservation_id in description:
+                            return event
+                
+                # If not found, search in all staff calendars
+                for staff_id, staff_data in self.staff_data.items():
+                    staff_calendar_id = self._get_staff_calendar_id(staff_data.get("name"))
+                    if not staff_calendar_id:
+                        continue
+                    
+                    try:
+                        events_result = self.service.events().list(
+                            calendarId=staff_calendar_id,
+                            timeMin=datetime.now().isoformat() + 'Z',
+                            maxResults=100,
+                            singleEvents=True,
+                            orderBy='startTime'
+                        ).execute()
+                        
+                        events = events_result.get('items', [])
+                        
+                        for event in events:
+                            description = event.get('description', '')
+                            if reservation_id in description:
+                                return event
+                    except Exception as e:
+                        print(f"Error searching calendar {staff_calendar_id}: {e}")
+                        continue
+                
+                return None
             
         except Exception as e:
             print(f"Failed to get reservation by ID {reservation_id}: {e}")
             return None
     
-    def cancel_reservation_by_id(self, reservation_id: str) -> bool:
-        """Cancel a reservation by reservation ID"""
+    def cancel_reservation_by_id(self, reservation_id: str, staff_name: str = None) -> bool:
+        """Cancel a reservation by reservation ID from staff-specific calendar"""
         try:
             # Find the event with the reservation ID
-            event = self.get_reservation_by_id(reservation_id)
+            event = self.get_reservation_by_id(reservation_id, staff_name)
             
             if not event:
                 print(f"Reservation {reservation_id} not found in calendar")
                 return False
             
-            # Delete the event
+            # Extract staff name from event if not provided
+            if not staff_name:
+                summary = event.get('summary', '')
+                try:
+                    import re
+                    m = re.search(r"^\[予約\] (.+) - (.+) \((.+)\)$", summary)
+                    if m:
+                        staff_name = m.group(3)
+                except Exception:
+                    pass
+            
+            # Get staff-specific calendar ID
+            staff_calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+            if not staff_calendar_id:
+                print(f"Staff calendar ID not found for {staff_name}")
+                return False
+            
+            # Delete the event from staff-specific calendar
             self.service.events().delete(
-                calendarId=self.calendar_id,
+                calendarId=staff_calendar_id,
                 eventId=event['id']
             ).execute()
             
@@ -847,6 +988,27 @@ class GoogleCalendarHelper:
                     return os.getenv(email_env)
                 break
         return None
+    
+    def _get_staff_calendar_id(self, staff_name: str) -> Optional[str]:
+        """Get staff calendar ID from mapping. Returns None if not found or staff is '未指定'."""
+        if not staff_name or staff_name == "未指定":
+            # Use default calendar for unspecified staff
+            return self.calendar_id
+        
+        # Find staff by name in the staff data
+        for staff_id, staff_data in self.staff_data.items():
+            if staff_data.get("name") == staff_name:
+                calendar_id_env = staff_data.get("calendar_id")
+                if calendar_id_env:
+                    # Get calendar ID from environment variable
+                    calendar_id = os.getenv(calendar_id_env)
+                    if calendar_id:
+                        return calendar_id
+                break
+        
+        # Fallback to default calendar if staff calendar not found
+        print(f"Warning: Calendar ID not found for staff '{staff_name}', using default calendar")
+        return self.calendar_id
     
     def _get_staff_color_id(self, staff_name: str) -> Optional[str]:
         """Get staff color ID from mapping"""
@@ -881,11 +1043,11 @@ class GoogleCalendarHelper:
     def check_staff_availability_for_time(self, date_str: str, start_time: str, end_time: str, staff_name: str, exclude_reservation_id: str = None) -> bool:
         """Check if a staff member is available for a specific time period"""
         try:
-            # Get all events for the date
-            all_events = self.get_events_for_date(date_str)
+            # Get all events for the date from staff-specific calendar
+            all_events = self.get_events_for_date(date_str, staff_name)
             
-            # Filter events by staff
-            staff_events = self._filter_events_by_staff(all_events, staff_name)
+            # No need to filter by staff since we're already querying staff-specific calendar
+            staff_events = all_events
             
             # Parse the requested time period
             from datetime import datetime
@@ -958,16 +1120,31 @@ class GoogleCalendarHelper:
             print(f"Error checking service change overlap: {e}")
             return False, start_time, None
     
-    def check_user_time_conflict(self, date_str: str, start_time: str, end_time: str, user_id: str, exclude_reservation_id: str = None) -> bool:
+    def check_user_time_conflict(self, date_str: str, start_time: str, end_time: str, user_id: str, exclude_reservation_id: str = None, staff_name: str = None) -> bool:
         """
         Check if a user already has a reservation at the same time.
         Returns True if there's a conflict (user already has a reservation at this time).
+        Note: This checks across all staff calendars since a user can't have multiple reservations at the same time regardless of staff.
         """
         try:
             from datetime import datetime
             
-            # Get all events for the date
-            all_events = self.get_events_for_date(date_str)
+            # Get all events for the date from all staff calendars
+            # Since a user can't have multiple reservations at the same time regardless of staff,
+            # we need to check all calendars
+            all_events = []
+            
+            # Check default calendar if exists
+            if self.calendar_id:
+                default_events = self.get_events_for_date(date_str, None)
+                all_events.extend(default_events)
+            
+            # Check all staff calendars
+            for staff_id, staff_data in self.staff_data.items():
+                staff_name_check = staff_data.get("name")
+                if staff_name_check:
+                    staff_events = self.get_events_for_date(date_str, staff_name_check)
+                    all_events.extend(staff_events)
             print("[User Time Conflict] All events:", all_events)
             # Parse the requested time period
             start_datetime = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
@@ -1030,11 +1207,11 @@ class GoogleCalendarHelper:
         try:
             from datetime import datetime
             
-            # Get all events for the date
-            all_events = self.get_events_for_date(date_str)
+            # Get all events for the date from staff-specific calendar
+            all_events = self.get_events_for_date(date_str, staff_name)
             
-            # Filter events by staff
-            staff_events = self._filter_events_by_staff(all_events, staff_name)
+            # No need to filter by staff since we're already querying staff-specific calendar
+            staff_events = all_events
             
             # Parse the requested time period
             start_datetime = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")

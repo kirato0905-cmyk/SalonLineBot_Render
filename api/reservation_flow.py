@@ -168,7 +168,8 @@ class ReservationFlow:
         end_date = start_date + timedelta(days=1)  # Next day at 00:00
         
         # Get all slots for the date range and filter for the specific date
-        all_slots = self.google_calendar.get_available_slots(start_date, end_date)
+        # Note: If staff_name is None, get_available_slots will use default calendar
+        all_slots = self.google_calendar.get_available_slots(start_date, end_date, staff_name)
         
         # Filter slots for the specific date
         date_slots = [slot for slot in all_slots if slot["date"] == selected_date]
@@ -1393,8 +1394,9 @@ class ReservationFlow:
             if not sheets_success:
                 return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
             
-            # Remove from Google Calendar
-            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id)
+            # Remove from Google Calendar (use staff name from reservation data)
+            staff_name = reservation.get("staff")
+            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id, staff_name)
             
             if not calendar_success:
                 logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
@@ -1436,6 +1438,8 @@ class ReservationFlow:
                 return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
             
             # Remove from Google Calendar
+            # Note: For direct reservation ID cancellation, we need to search all calendars
+            # The get_reservation_by_id method will handle this
             calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id)
             
             if not calendar_success:
@@ -1911,8 +1915,9 @@ class ReservationFlow:
                 if not sheets_success:
                     return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
                 
-                # Cancel the Google Calendar event
-                calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id)
+                # Cancel the Google Calendar event (use staff name from reservation data)
+                staff_name = reservation.get("staff")
+                calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id, staff_name)
                 
                 if not calendar_success:
                     print(f"Warning: Failed to cancel calendar event for reservation {reservation_id}")
@@ -2662,11 +2667,13 @@ class ReservationFlow:
 
 別の時間を選択してください。"""
         
-        # Update Google Calendar with the selected date
+        # Update Google Calendar with the selected date (use staff name from reservation data)
+        staff_name = reservation.get("staff")
         calendar_success = self.google_calendar.modify_reservation_time(
             reservation["reservation_id"], 
             selected_date,  # Use selected date instead of original date
-            start_time
+            start_time,
+            new_staff=staff_name  # Pass current staff to ensure correct calendar is used
         )
         
         if not calendar_success:
@@ -2830,11 +2837,14 @@ class ReservationFlow:
 別の時間を選択してください。"""
         
         # Update Google Calendar: change service and adjust duration on the exact event by ID
+        # Use current staff name to ensure correct calendar is used
+        staff_name = reservation.get("staff")
         calendar_success = self.google_calendar.modify_reservation_time(
             reservation["reservation_id"],
             reservation["date"],
             reservation["start_time"],
-            new_service=new_service
+            new_service=new_service,
+            new_staff=staff_name  # Pass current staff to ensure correct calendar is used
         )
         
         if not calendar_success:

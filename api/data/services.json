@@ -35,21 +35,24 @@
       "specialty": "カット・カラー",
       "experience": "5年",
       "email_env": "STAFF_TANAKA_EMAIL",
-      "color_id": "1"
+      "color_id": "1",
+      "calendar_id": "goldentime0719@gmail.com"
     },
     "staff_2": {
       "name": "佐藤",
       "specialty": "カラー・パーマ",
       "experience": "3年",
       "email_env": "STAFF_SATO_EMAIL",
-      "color_id": "1"
+      "color_id": "1",
+      "calendar_id": "keepconfidentalw@gmail.com"
     },
     "staff_3": {
       "name": "鈴木",
       "specialty": "カット・パーマ",
       "experience": "7年",
       "email_env": "STAFF_SUZUKI_EMAIL",
-      "color_id": "1"
+      "color_id": "1",
+      "calendar_id": "goldenchain0804@gmail.com"
     }
   }
 }
