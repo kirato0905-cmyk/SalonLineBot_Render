@@ -1,24 +1,28 @@
 {
   "services": {
     "service_1": {
+      "id": "cut",
       "name": "カット",
       "duration": 60,
       "price": 3000,
       "description": "ヘアカットサービス"
     },
     "service_2": {
+      "id": "color",
       "name": "カラー",
       "duration": 120,
       "price": 8000,
       "description": "ヘアカラーサービス"
     },
     "service_3": {
+      "id": "perm",
       "name": "パーマ",
       "duration": 150,
       "price": 12000,
       "description": "パーマサービス"
     },
     "service_4": {
+      "id": "treatment",
       "name": "トリートメント",
       "duration": 90,
       "price": 5000,

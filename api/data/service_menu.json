@@ -5,7 +5,7 @@
       "name": "カット",
       "description": "骨格や髪質に合わせて丁寧にデザインするスタンダードカットです。",
       "duration": 60,
-      "price": 5500,
+      "price": 3000,
       "image_url": "https://imgbp.hotp.jp/CSP/IMG_SRC/24/76/B174972476/B174972476.jpg?impolicy=HPB_policy_default&w=419&h=314",
       "cta_label": "カットで予約する"
     },
@@ -14,7 +14,7 @@
       "name": "カラー",
       "description": "艶と透明感を引き出す似合わせカラー。ダメージケアもセットです。",
       "duration": 120,
-      "price": 9800,
+      "price": 8000,
       "image_url": "https://imgbp.hotp.jp/CSP/IMG_SRC/64/29/B207186429/B207186429.jpg?impolicy=HPB_policy_default&w=349&h=262",
       "cta_label": "カラーで予約する"
     },
@@ -23,7 +23,7 @@
       "name": "パーマ",
       "description": "柔らかな質感と動きを長持ちさせるデジタルパーマコース。",
       "duration": 150,
-      "price": 13200,
+      "price": 12000,
       "image_url": "https://imagesalon-cuts.com/wp-content/uploads/2022/02/permstyle_1-768x512.jpg",
       "cta_label": "パーマで予約する"
     },
@@ -32,7 +32,7 @@
       "name": "トリートメント",
       "description": "内部補修から保湿まで行う集中ケアトリートメント。",
       "duration": 90,
-      "price": 6600,
+      "price": 5000,
       "image_url": "https://imagesalon-cuts.com/wp-content/uploads/2021/03/system-treatment-2.jpg",
       "cta_label": "トリートメントで予約"
     }
