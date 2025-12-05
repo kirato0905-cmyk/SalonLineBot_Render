@@ -142,12 +142,24 @@ class GoogleCalendarHelper:
             # Parse date and time
             date_str = reservation_data['date']
             service = reservation_data['service']
-            staff = reservation_data['staff']
+            staff = reservation_data.get('staff')
+            
+            # Debug: Print reservation data
+            print(f"[create_reservation_event] Reservation data: {reservation_data}")
+            print(f"[create_reservation_event] Staff name: {staff}")
+            
+            if not staff:
+                print(f"[create_reservation_event] ERROR: Staff name not found in reservation_data!")
+                logging.error(f"Staff name missing in reservation_data: {reservation_data}")
+                return False
             
             # Get staff-specific calendar ID
             staff_calendar_id = self._get_staff_calendar_id(staff)
+            print(f"[create_reservation_event] Staff calendar ID for '{staff}': {staff_calendar_id}")
+            
             if not staff_calendar_id:
-                print(f"Staff calendar ID not found for {staff}, skipping event creation")
+                print(f"[create_reservation_event] ERROR: Staff calendar ID not found for '{staff}', skipping event creation")
+                logging.error(f"Staff calendar ID not found for staff '{staff}'. Available staff: {list(self.staff_data.keys())}")
                 return False
             
             # Handle both single time and time range
@@ -170,9 +182,24 @@ class GoogleCalendarHelper:
             # Calculate duration for display purposes
             duration_minutes = int((end_datetime - start_datetime).total_seconds() / 60)
             
-            # Format for Google Calendar API
+            # Format for Google Calendar API with timezone
+            # Convert to Tokyo timezone for proper handling
+            tokyo_tz = pytz.timezone('Asia/Tokyo')
+            if start_datetime.tzinfo is None:
+                start_datetime = tokyo_tz.localize(start_datetime)
+            else:
+                start_datetime = start_datetime.astimezone(tokyo_tz)
+            
+            if end_datetime.tzinfo is None:
+                end_datetime = tokyo_tz.localize(end_datetime)
+            else:
+                end_datetime = end_datetime.astimezone(tokyo_tz)
+            
+            # Format as ISO8601 with timezone
             start_iso = start_datetime.isoformat()
             end_iso = end_datetime.isoformat()
+            
+            print(f"[create_reservation_event] Formatted times - Start: {start_iso}, End: {end_iso}")
             
             # Get reservation ID
             reservation_id = reservation_data.get('reservation_id', self.generate_reservation_id(date_str))
@@ -218,19 +245,53 @@ class GoogleCalendarHelper:
                     event['attendees'] = [{'email': staff_email}]
             
             # Create the event in staff-specific calendar
+            print(f"[create_reservation_event] Creating event in calendar: {staff_calendar_id}")
+            print(f"[create_reservation_event] Event details: {event}")
+            
             created_event = self.service.events().insert(
                 calendarId=staff_calendar_id,
                 body=event
             ).execute()
             
-            print(f"Calendar event created: {created_event.get('htmlLink')}")
+            print(f"[create_reservation_event] SUCCESS: Calendar event created: {created_event.get('htmlLink')}")
+            print(f"[create_reservation_event] Event ID: {created_event.get('id')}")
             return True
             
         except HttpError as e:
-            print(f"Google Calendar API error: {e}")
+            error_details = f"Google Calendar API error: {e}"
+            print(f"[create_reservation_event] ERROR: {error_details}")
+            
+            # Extract detailed error information
+            error_content = None
+            if hasattr(e, 'content'):
+                try:
+                    import json
+                    error_content = json.loads(e.content.decode('utf-8'))
+                    print(f"[create_reservation_event] Error content: {error_content}")
+                except:
+                    error_content = str(e.content)
+            
+            error_message = error_content.get('error', {}).get('message', str(e)) if isinstance(error_content, dict) else str(e)
+            error_code = error_content.get('error', {}).get('code', None) if isinstance(error_content, dict) else None
+            
+            logging.error(f"[create_reservation_event] HttpError - Code: {error_code}, Message: {error_message}, Content: {error_content}")
+            print(f"[create_reservation_event] HttpError - Code: {error_code}, Message: {error_message}")
+            
+            # Check for common errors
+            if error_code == 403:
+                print(f"[create_reservation_event] PERMISSION ERROR: Service account may not have access to calendar: {staff_calendar_id}")
+                logging.error(f"Permission denied for calendar {staff_calendar_id}. Check service account permissions.")
+            elif error_code == 404:
+                print(f"[create_reservation_event] NOT FOUND ERROR: Calendar may not exist: {staff_calendar_id}")
+                logging.error(f"Calendar not found: {staff_calendar_id}")
+            
             return False
         except Exception as e:
-            print(f"Failed to create calendar event: {e}")
+            error_details = f"Failed to create calendar event: {e}"
+            print(f"[create_reservation_event] ERROR: {error_details}")
+            logging.error(f"[create_reservation_event] Exception: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
             return False
 
     def _get_service_duration_minutes(self, service_name: str) -> int:
@@ -999,17 +1060,26 @@ class GoogleCalendarHelper:
     
     def _get_staff_calendar_id(self, staff_name: str) -> Optional[str]:
         """Get staff calendar ID from services.json. Returns None if not found or staff is '未指定'."""
+        print(f"[_get_staff_calendar_id] Looking for calendar ID for staff: '{staff_name}'")
+        print(f"[_get_staff_calendar_id] Available staff data: {[(sid, sdata.get('name'), sdata.get('calendar_id')) for sid, sdata in self.staff_data.items()]}")
+        
         if not staff_name or staff_name == "未指定":
+            print(f"[_get_staff_calendar_id] Staff name is empty or '未指定', returning fallback calendar_id: {self.calendar_id}")
             return self.calendar_id  # fallback if needed
 
         for staff_id, staff_data in self.staff_data.items():
-            if staff_data.get("name") == staff_name:
+            staff_data_name = staff_data.get("name")
+            print(f"[_get_staff_calendar_id] Checking staff_id={staff_id}, name='{staff_data_name}' against '{staff_name}'")
+            if staff_data_name == staff_name:
                 calendar_id = staff_data.get("calendar_id")
+                print(f"[_get_staff_calendar_id] Found matching staff! calendar_id: {calendar_id}")
                 if calendar_id:
                     return calendar_id  # Use directly from JSON
+                else:
+                    print(f"[_get_staff_calendar_id] WARNING: calendar_id is empty for staff '{staff_name}'")
                 break
 
-        print(f"Warning: Calendar ID not found for staff '{staff_name}', using default calendar")
+        print(f"[_get_staff_calendar_id] WARNING: Calendar ID not found for staff '{staff_name}', using default calendar: {self.calendar_id}")
         return self.calendar_id
     
     def _get_staff_color_id(self, staff_name: str) -> Optional[str]:

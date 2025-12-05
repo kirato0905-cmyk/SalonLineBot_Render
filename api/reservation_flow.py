@@ -906,7 +906,13 @@ class ReservationFlow:
         if any(keyword in message for keyword in yes_keywords):
             # Complete the reservation
             reservation_data = self.user_states[user_id]["data"].copy()
-            print("reservation_data", reservation_data)
+            print(f"[_handle_confirmation] reservation_data: {reservation_data}")
+            print(f"[_handle_confirmation] staff in reservation_data: {reservation_data.get('staff')}")
+            
+            # Ensure staff is in reservation_data
+            if 'staff' not in reservation_data or not reservation_data.get('staff'):
+                logging.error(f"[_handle_confirmation] ERROR: Staff not found in reservation_data! Data: {reservation_data}")
+                return "申し訳ございませんが、予約処理中にエラーが発生しました。担当者の情報が見つかりませんでした。最初からやり直してください。"
             
             # CRITICAL: Check availability again before confirming to prevent race conditions
             availability_check = self._check_final_availability(reservation_data)
@@ -928,13 +934,17 @@ class ReservationFlow:
             client_name = self._get_line_display_name(user_id)
             
             # Create calendar event immediately
+            print(f"[_handle_confirmation] Calling create_reservation_event with staff: {reservation_data.get('staff')}")
             calendar_success = self.google_calendar.create_reservation_event(
                 reservation_data, 
                 client_name
             )
             
             if not calendar_success:
-                logging.warning(f"Failed to create calendar event for user {user_id}")
+                error_msg = f"⚠️ 予約は確定しましたが、カレンダーへの登録に失敗しました。\n予約ID: {reservation_id}\nスタッフまでご連絡ください。"
+                logging.error(f"[_handle_confirmation] Failed to create calendar event for user {user_id}, reservation {reservation_id}")
+                # Continue with reservation but log the error
+                # Don't fail the entire reservation process
            
             # Save reservation to Google Sheets Reservations sheet
             sheets_success = False
