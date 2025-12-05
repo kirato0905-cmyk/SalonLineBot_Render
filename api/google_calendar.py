@@ -31,6 +31,7 @@ class GoogleCalendarHelper:
 
         # Initialize Google Calendar service
         self.service = None
+        self.service_account_email = None
         try:
             self._authenticate()
         except Exception as e:
@@ -103,9 +104,17 @@ class GoogleCalendarHelper:
                 scopes=['https://www.googleapis.com/auth/calendar']
             )
             
+            # Store service account email for sharing instructions
+            self.service_account_email = service_account_info.get('client_email', '')
+            if self.service_account_email:
+                print(f"Google Calendar API authenticated successfully")
+                print(f"Service Account Email: {self.service_account_email}")
+                print(f"IMPORTANT: Share each staff calendar with this email address!")
+            else:
+                print("Google Calendar API authenticated successfully (service account email not found)")
+            
             # Build the service
             self.service = build('calendar', 'v3', credentials=credentials)
-            print("Google Calendar API authenticated successfully")
             
         except Exception as e:
             print(f"Failed to authenticate with Google Calendar: {e}")
@@ -279,8 +288,15 @@ class GoogleCalendarHelper:
             
             # Check for common errors
             if error_code == 403:
+                service_account_email = self.service_account_email or "your-service-account@project.iam.gserviceaccount.com"
                 print(f"[create_reservation_event] PERMISSION ERROR: Service account may not have access to calendar: {staff_calendar_id}")
-                logging.error(f"Permission denied for calendar {staff_calendar_id}. Check service account permissions.")
+                print(f"[create_reservation_event] SOLUTION: Share calendar '{staff_calendar_id}' with service account: {service_account_email}")
+                print(f"[create_reservation_event] Steps to fix:")
+                print(f"  1. Open Google Calendar for: {staff_calendar_id}")
+                print(f"  2. Go to Settings > Share with specific people")
+                print(f"  3. Add: {service_account_email}")
+                print(f"  4. Set permission to: 'Make changes to events'")
+                logging.error(f"Permission denied for calendar {staff_calendar_id}. Service account: {service_account_email}")
             elif error_code == 404:
                 print(f"[create_reservation_event] NOT FOUND ERROR: Calendar may not exist: {staff_calendar_id}")
                 logging.error(f"Calendar not found: {staff_calendar_id}")
