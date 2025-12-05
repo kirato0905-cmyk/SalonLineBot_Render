@@ -134,6 +134,21 @@ class ReservationFlow:
             return active_staff[0].get("name")
         return None
     
+    def _get_staff_calendar_url(self, staff_name: str) -> str:
+        """Return the Google Calendar URL for the selected staff."""
+        staff_calendar_id = None
+        for staff_id, staff_data in self.staff_members.items():
+            if staff_data.get("name") == staff_name:
+                staff_calendar_id = staff_data.get("calendar_id")
+                break
+        if staff_calendar_id:
+            # Generate embed URL for Google Calendar
+            return (
+                f"https://calendar.google.com/calendar/embed?src={staff_calendar_id}&ctz=Asia%2FTokyo"
+            )
+        # Fallback to default calendar or generic URL
+        return "https://calendar.google.com/calendar"
+    
     def _get_modification_menu(self) -> str:
         """Get the modification menu, conditionally showing staff option"""
         menu_items = [
@@ -176,11 +191,14 @@ class ReservationFlow:
         
         return date_slots
     
-    def _create_calendar_template(self) -> str:
-        """Create Google Calendar URL for date selection"""
-        # Get the Google Calendar URL from the calendar helper
-        calendar_url = self.google_calendar.get_calendar_url()
-        
+    def _create_calendar_template(self, staff_name: str = None) -> str:
+        """Create Google Calendar URL for date selection (per staff)"""
+        # Use staff-specific calendar URL if staff_name is provided
+        if staff_name:
+            calendar_url = self._get_staff_calendar_url(staff_name)
+        else:
+            calendar_url = self.google_calendar.get_calendar_url()
+
         calendar_message = "📅 **ご希望の日付をお選びください**\n\n"
         calendar_message += "🗓️ **Googleカレンダーで空き状況を確認してください：**\n"
         calendar_message += f"🔗 {calendar_url}\n\n"
@@ -190,10 +208,9 @@ class ReservationFlow:
         calendar_message += "3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信\n"
         calendar_message += "📝 例：`2025-01-15`\n\n"
         calendar_message += "❌ 予約をキャンセルする場合は「キャンセル」と送信"
-        
+
         return calendar_message
-    
-    
+        
     def detect_intent(self, message: str, user_id: str = None) -> str:
         """Detect user intent from message with context awareness"""
         # Normalize message: strip whitespace
@@ -371,13 +388,13 @@ class ReservationFlow:
             single_staff_name = self._get_single_staff_name()
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
-            
+            staff_calendar_url = self._get_staff_calendar_url(single_staff_name)            
             return f"""{selected_service}ですね！
 担当は{single_staff_name}さんで承ります。
 
 ご希望の日付をお選びください。
 📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {self.google_calendar.get_calendar_url()}
+🔗 {staff_calendar_url}
 
 💡 **手順：**
 1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
@@ -439,12 +456,22 @@ class ReservationFlow:
         
         self.user_states[user_id]["data"]["staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
-        
+        staff_calendar_url = self._get_staff_calendar_url(selected_staff)
         # Add "さん" only for specific staff members, not for "未指定"
         staff_display = f"{selected_staff}さん" if selected_staff != "未指定" else selected_staff
-        
-        # Return calendar template for date selection
-        return self._create_calendar_template()
+        return f"""担当者：{staff_display}を選択しました。
+
+ご希望の日付をお選びください。
+📅 **Googleカレンダーで空き状況を確認してください：**
+🔗 {staff_calendar_url}
+
+💡 **手順：**
+1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
+2️⃣ 空いている日付を確認
+3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
+📝 例：`2025-01-15`
+
+❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
     
     def _handle_date_selection(self, user_id: str, message: str) -> str:
         """Handle date selection from calendar template"""
