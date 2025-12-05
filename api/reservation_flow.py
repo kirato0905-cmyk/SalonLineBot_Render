@@ -194,10 +194,9 @@ class ReservationFlow:
     def _create_calendar_template(self, staff_name: str = None) -> str:
         """Create Google Calendar URL for date selection (per staff)"""
         # Use staff-specific calendar URL if staff_name is provided
-        if staff_name:
-            calendar_url = self._get_staff_calendar_url(staff_name)
-        else:
-            calendar_url = self.google_calendar.get_calendar_url()
+        
+        # Fallback to default calendar (should not happen in normal flow)
+        calendar_url = self.google_calendar.get_calendar_url(staff_name)
 
         calendar_message = "📅 **ご希望の日付をお選びください**\n\n"
         calendar_message += "🗓️ **Googleカレンダーで空き状況を確認してください：**\n"
@@ -532,12 +531,16 @@ class ReservationFlow:
             # No available slots for selected date - return to date selection
             self.user_states[user_id]["step"] = "date_selection"
             # ...existing "no available slot" message...
+            # Get staff name for calendar URL
+            staff_name = self.user_states[user_id]["data"].get("staff")
+            staff_calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
+            
             return f"""申し訳ございませんが、{selected_date}は{service_name}（{service_duration}分）の予約可能な時間がありません。
 
 他の日付をお選びください。
 
 📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {self.google_calendar.get_calendar_url()}
+🔗 {staff_calendar_url}
 
 💡 **手順：**
 1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
@@ -608,7 +611,7 @@ class ReservationFlow:
 他の日付をお選びください。
 
 📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {self.google_calendar.get_calendar_url()}
+🔗 {staff_calendar_url}
 
 💡 **手順：**
 1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
@@ -1296,8 +1299,9 @@ class ReservationFlow:
                     self.user_states[user_id]["selected_reservation"] = selected_reservation
                     self.user_states[user_id]["step"] = "cancel_confirm"
                     
-                    # Get Google Calendar URL
-                    calendar_url = self.google_calendar.get_calendar_url()
+                    # Get staff-specific calendar URL
+                    staff_name = selected_reservation.get('staff')
+                    calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
                     return f"""キャンセルする予約を確認してください：
 
@@ -1327,8 +1331,9 @@ class ReservationFlow:
                     self.user_states[user_id]["selected_reservation"] = selected_reservation
                     self.user_states[user_id]["step"] = "cancel_confirm"
                     
-                    # Get Google Calendar URL
-                    calendar_url = self.google_calendar.get_calendar_url()
+                    # Get staff-specific calendar URL
+                    staff_name = selected_reservation.get('staff')
+                    calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
                     return f"""キャンセルする予約を確認してください：
 
@@ -1785,8 +1790,9 @@ class ReservationFlow:
                     self.user_states[user_id]["reservation_data"] = selected_reservation
                     self.user_states[user_id]["step"] = "modify_select_field"
                     
-                    # Get Google Calendar URL
-                    calendar_url = self.google_calendar.get_calendar_url()
+                    # Get staff-specific calendar URL
+                    staff_name = selected_reservation.get('staff')
+                    calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
                     return f"""予約が見つかりました！
 
@@ -1816,8 +1822,9 @@ class ReservationFlow:
                     self.user_states[user_id]["reservation_data"] = selected_reservation
                     self.user_states[user_id]["step"] = "modify_select_field"
                     
-                    # Get Google Calendar URL
-                    calendar_url = self.google_calendar.get_calendar_url()
+                    # Get staff-specific calendar URL
+                    staff_name = selected_reservation.get('staff')
+                    calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
                     return f"""予約が見つかりました！
 
@@ -2023,8 +2030,9 @@ class ReservationFlow:
         self.user_states[user_id]["modification_type"] = "time"
         self.user_states[user_id]["step"] = "modify_time_date_select"
         
-        # Get Google Calendar URL
-        calendar_url = self.google_calendar.get_calendar_url()
+        # Get staff-specific calendar URL
+        staff_name = reservation.get('staff')
+        calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
         
         return f"""時間変更ですね！
 
@@ -2056,8 +2064,9 @@ class ReservationFlow:
             # User wants to change date
             self.user_states[user_id]["step"] = "modify_time_input_date"
             
-            # Get Google Calendar URL
-            calendar_url = self.google_calendar.get_calendar_url()
+            # Get staff-specific calendar URL
+            staff_name = reservation.get('staff')
+            calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
             
             return f"""新しい日付を入力してください。
 

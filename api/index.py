@@ -252,51 +252,40 @@ def handle_message(event: MessageEvent):
                 except Exception as reply_error:
                     logging.error(f"Failed to send error message: {reply_error}")
                 return
-        elif message_text.isdigit():
-            # Handle FAQ number input (1-10)
+        # Handle FAQ input (FAQ1, FAQ2, ... format)
+        elif message_text.upper().startswith("FAQ"):
             try:
-                faq_number = int(message_text)
-                if 1 <= faq_number <= 10:
-                    faq_item = get_faq_by_number(faq_number)
-                    if faq_item and "answer" in faq_item:
-                        # Use the answer directly from faq.json (already loaded)
-                        send_faq_answer_by_item(event.reply_token, faq_item, configuration)
-                        action_type = "faq_answer"
-                        print(f"FAQ answer sent successfully for number {faq_number} to user {user_id}")
-                        # Log FAQ answer access
-                        if sheets_logger:
-                            sheets_logger.log_message(
-                                user_id=user_id,
-                                user_message=message_text,
-                                bot_response=f"FAQ answer for: {faq_item['question']}",
-                                user_name=user_name,
-                                message_type="text",
-                                action_type=action_type,
-                                processing_time=(time.time() - start_time) * 1000
-                            )
-                        return
-                    else:
-                        # FAQ not found for this number
-                        with ApiClient(configuration) as api_client:
-                            MessagingApi(api_client).reply_message(
-                                ReplyMessageRequest(
-                                    reply_token=event.reply_token,
-                                    messages=[TextMessage(text="申し訳ございませんが、その番号の質問は見つかりませんでした。")]
-                                )
-                            )
-                        return
+                # FAQ1, FAQ2形式の入力に対応
+                faq_item = get_faq_by_number(message_text)
+                if faq_item and "answer" in faq_item:
+                    # Use the answer directly from faq.json (already loaded)
+                    send_faq_answer_by_item(event.reply_token, faq_item, configuration)
+                    action_type = "faq_answer"
+                    print(f"FAQ answer sent successfully for {message_text} to user {user_id}")
+                    # Log FAQ answer access
+                    if sheets_logger:
+                        sheets_logger.log_message(
+                            user_id=user_id,
+                            user_message=message_text,
+                            bot_response=f"FAQ answer for: {faq_item['question']}",
+                            user_name=user_name,
+                            message_type="text",
+                            action_type=action_type,
+                            processing_time=(time.time() - start_time) * 1000
+                        )
+                    return
                 else:
-                    # Number out of range
+                    # FAQ not found
                     with ApiClient(configuration) as api_client:
                         MessagingApi(api_client).reply_message(
                             ReplyMessageRequest(
                                 reply_token=event.reply_token,
-                                messages=[TextMessage(text="質問番号は1〜10の範囲で入力してください。")]
+                                messages=[TextMessage(text="申し訳ございませんが、そのFAQ番号は見つかりませんでした。\n「よくある質問」と送信して一覧を確認してください。")]
                             )
                         )
                     return
             except Exception as e:
-                logging.error(f"Failed to handle FAQ number: {e}", exc_info=True)
+                logging.error(f"Failed to handle FAQ input: {e}", exc_info=True)
                 # Send error message to user
                 try:
                     with ApiClient(configuration) as api_client:

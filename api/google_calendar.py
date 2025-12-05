@@ -645,13 +645,14 @@ class GoogleCalendarHelper:
                 }
             ]
     
-    def get_calendar_url(self) -> str:
-        """Get the public Google Calendar URL for viewing availability"""
-        if not self.calendar_id:
+    def get_calendar_url(self, staff_name: str = None) -> str:
+        """Get the public Google Calendar URL for viewing availability (staff-specific)"""
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        if not calendar_id:
             return "https://calendar.google.com/calendar"
         
         # Enhanced calendar URL with better visibility and Tokyo timezone
-        base_url = f"https://calendar.google.com/calendar/embed?src={self.calendar_id}"
+        base_url = f"https://calendar.google.com/calendar/embed?src={calendar_id}"
         params = [
             "ctz=Asia%2FTokyo",  # Tokyo timezone
             "mode=WEEK",         # Week view
@@ -669,29 +670,32 @@ class GoogleCalendarHelper:
         
         return f"{base_url}&{'&'.join(params)}"
     
-    def get_public_calendar_url(self) -> str:
-        """Get the public calendar URL (if calendar is made public)"""
-        if not self.calendar_id:
+    def get_public_calendar_url(self, staff_name: str = None) -> str:
+        """Get the public calendar URL (if calendar is made public) - staff-specific"""
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        if not calendar_id:
             return "https://calendar.google.com/calendar"
         
         # Public calendar URL format with Tokyo timezone
-        return f"https://calendar.google.com/calendar/embed?src={self.calendar_id}&ctz=Asia%2FTokyo"
+        return f"https://calendar.google.com/calendar/embed?src={calendar_id}&ctz=Asia%2FTokyo"
     
-    def get_simple_calendar_url(self) -> str:
-        """Get a simple calendar URL for basic sharing"""
-        if not self.calendar_id:
+    def get_simple_calendar_url(self, staff_name: str = None) -> str:
+        """Get a simple calendar URL for basic sharing - staff-specific"""
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        if not calendar_id:
             return "https://calendar.google.com/calendar"
         
         # Simple calendar URL
-        return f"https://calendar.google.com/calendar/embed?src={self.calendar_id}"
+        return f"https://calendar.google.com/calendar/embed?src={calendar_id}"
     
-    def get_short_calendar_url(self) -> str:
-        """Get a short calendar URL for notifications"""
-        if not self.calendar_id:
+    def get_short_calendar_url(self, staff_name: str = None) -> str:
+        """Get a short calendar URL for notifications - staff-specific"""
+        calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
+        if not calendar_id:
             return "https://calendar.google.com/calendar"
         
         # Short calendar URL with minimal parameters
-        return f"https://calendar.google.com/calendar/embed?src={self.calendar_id}&ctz=Asia%2FTokyo"
+        return f"https://calendar.google.com/calendar/embed?src={calendar_id}&ctz=Asia%2FTokyo"
     
     def get_events_for_date(self, date_str: str, staff_name: str = None) -> List[Dict]:
         """Get all events for a specific date (timezone-aware) from staff-specific calendar"""

@@ -84,7 +84,9 @@ class SlackNotifier:
     
     def notify_reservation_confirmation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
         """Send notification when reservation is confirmed"""
-        calendar_url = self._get_calendar_url()
+        # Get staff-specific calendar URL
+        staff_name = reservation_data.get('staff')
+        calendar_url = self._get_calendar_url(staff_name)
         message = f"✅ **新規予約確定**\n"
         message += f"• 予約ID: `{reservation_data.get('reservation_id', 'N/A')}`\n"
         message += f"• お客様: {client_name}\n"
@@ -104,7 +106,9 @@ class SlackNotifier:
     
     def notify_reservation_modification(self, old_reservation: Dict[str, Any], new_reservation: Dict[str, Any], client_name: str) -> bool:
         """Send notification when reservation is modified"""
-        calendar_url = self._get_calendar_url()
+        # Get staff-specific calendar URL (use new reservation's staff, fallback to old)
+        staff_name = new_reservation.get('staff') or old_reservation.get('staff')
+        calendar_url = self._get_calendar_url(staff_name)
         message = f"🔄 **予約変更**\n"
         message += f"• 予約ID: `{old_reservation.get('reservation_id', 'N/A')}`\n"
         message += f"• お客様: {client_name}\n\n"
@@ -145,7 +149,9 @@ class SlackNotifier:
     
     def notify_reservation_cancellation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
         """Send notification when reservation is cancelled"""
-        calendar_url = self._get_calendar_url()
+        # Get staff-specific calendar URL
+        staff_name = reservation_data.get('staff')
+        calendar_url = self._get_calendar_url(staff_name)
         message = f"❌ **予約キャンセル**\n"
         message += f"• 予約ID: `{reservation_data.get('reservation_id', 'N/A')}`\n"
         message += f"• お客様: {client_name}\n"
@@ -263,12 +269,12 @@ class SlackNotifier:
         except Exception:
             return 0
     
-    def _get_calendar_url(self) -> str:
-        """Get the Google Calendar URL (short version)"""
+    def _get_calendar_url(self, staff_name: str = None) -> str:
+        """Get the Google Calendar URL (short version) - staff-specific"""
         try:
             from api.google_calendar import GoogleCalendarHelper
             calendar_helper = GoogleCalendarHelper()
-            return calendar_helper.get_short_calendar_url()
+            return calendar_helper.get_short_calendar_url(staff_name)
         except Exception as e:
             logging.error(f"Error getting calendar URL: {e}")
             return "https://calendar.google.com/calendar"

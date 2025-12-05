@@ -4,6 +4,8 @@ import logging
 from linebot.v3.messaging import (
     TemplateMessage,
     ButtonsTemplate,
+    CarouselTemplate,
+    CarouselColumn,
     MessageAction,
     ReplyMessageRequest,
     TextMessage,
@@ -25,18 +27,43 @@ def send_faq_menu(reply_token, configuration):
         if not faq_list or len(faq_list) == 0:
             raise ValueError("FAQ list is empty")
 
-        # すべての質問を1つのテキストメッセージで表示
-        faq_list = faq_list[:10]  # 最大10件まで
+        # 最大10件まで（CarouselTemplateの制限）
+        faq_list = faq_list[:10]
         print(f"Loaded {len(faq_list)} FAQ items")
 
-        lines = ["よくある質問はこちらです：", ""]
+        # CarouselTemplate用のカラムを作成
+        columns = []
         for idx, faq in enumerate(faq_list, start=1):
-            lines.append(f"{idx}. {faq['question']}")
+            question = faq.get('question', '')
+            # 質問文が長い場合は切り詰める（CarouselColumnのtextは最大120文字）
+            if len(question) > 100:
+                question = question[:97] + "..."
+            
+            # FAQ番号（FAQ1, FAQ2, ...）のアクションを作成
+            faq_id = f"FAQ{idx}"
+            columns.append(
+                CarouselColumn(
+                    text=question,
+                    actions=[
+                        MessageAction(
+                            label=faq_id,
+                            text=faq_id
+                        )
+                    ]
+                )
+            )
 
-        lines.append("")
-        lines.append("※質問番号（1～10）をお送りください。")
+        if not columns:
+            raise ValueError("No FAQ columns could be created")
 
-        faq_menu_message = TextMessage(text="\n".join(lines))
+        # CarouselTemplateを作成（最大10カラム）
+        carousel_template = CarouselTemplate(columns=columns)
+        
+        # TemplateMessageを作成
+        faq_menu_message = TemplateMessage(
+            alt_text="よくある質問一覧",
+            template=carousel_template
+        )
  
         with ApiClient(configuration) as api_client:
             MessagingApi(api_client).reply_message(
@@ -51,7 +78,7 @@ def send_faq_menu(reply_token, configuration):
         raise
 
 def get_faq_by_number(faq_number):
-    """番号でFAQを取得"""
+    """番号でFAQを取得（数値またはFAQ1形式の両方に対応）"""
     try:
         faq_path = os.path.join(os.path.dirname(__file__), "data", "faq.json")
         if not os.path.exists(faq_path):
@@ -60,9 +87,21 @@ def get_faq_by_number(faq_number):
         with open(faq_path, encoding="utf-8") as f:
             faq_list = json.load(f)
         
-        # 番号は1から始まるので、インデックスは-1
-        if 1 <= faq_number <= len(faq_list):
-            return faq_list[faq_number - 1]
+        # FAQ1, FAQ2形式の入力に対応
+        if isinstance(faq_number, str) and faq_number.upper().startswith("FAQ"):
+            try:
+                # "FAQ1" -> 1
+                number = int(faq_number.upper().replace("FAQ", ""))
+                if 1 <= number <= len(faq_list):
+                    return faq_list[number - 1]
+            except ValueError:
+                return None
+        
+        # 数値形式の入力にも対応（後方互換性）
+        if isinstance(faq_number, int):
+            if 1 <= faq_number <= len(faq_list):
+                return faq_list[faq_number - 1]
+        
         return None
     except Exception as e:
         logging.error(f"Error in get_faq_by_number: {e}", exc_info=True)
