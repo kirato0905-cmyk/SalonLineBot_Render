@@ -252,17 +252,14 @@ def handle_message(event: MessageEvent):
                 except Exception as reply_error:
                     logging.error(f"Failed to send error message: {reply_error}")
                 return
-        # Handle FAQ input (FAQ1, FAQ2, ... format)
-        elif message_text.upper().startswith("FAQ"):
+        elif message_text.upper().startswith("Q"):
+            # Handle FAQ input (Q1〜Q10)
             try:
-                # FAQ1, FAQ2形式の入力に対応
                 faq_item = get_faq_by_number(message_text)
                 if faq_item and "answer" in faq_item:
-                    # Use the answer directly from faq.json (already loaded)
                     send_faq_answer_by_item(event.reply_token, faq_item, configuration)
                     action_type = "faq_answer"
                     print(f"FAQ answer sent successfully for {message_text} to user {user_id}")
-                    # Log FAQ answer access
                     if sheets_logger:
                         sheets_logger.log_message(
                             user_id=user_id,
@@ -275,18 +272,16 @@ def handle_message(event: MessageEvent):
                         )
                     return
                 else:
-                    # FAQ not found
                     with ApiClient(configuration) as api_client:
                         MessagingApi(api_client).reply_message(
                             ReplyMessageRequest(
                                 reply_token=event.reply_token,
-                                messages=[TextMessage(text="申し訳ございませんが、そのFAQ番号は見つかりませんでした。\n「よくある質問」と送信して一覧を確認してください。")]
+                                messages=[TextMessage(text="申し訳ございませんが、そのFAQ番号は見つかりませんでした。")]
                             )
                         )
                     return
             except Exception as e:
                 logging.error(f"Failed to handle FAQ input: {e}", exc_info=True)
-                # Send error message to user
                 try:
                     with ApiClient(configuration) as api_client:
                         MessagingApi(api_client).reply_message(
