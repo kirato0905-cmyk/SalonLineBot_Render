@@ -140,35 +140,27 @@ class LineNotifier:
         # Get staff-specific calendar URL (use new reservation's staff, fallback to old)
         staff_name = new_reservation.get('staff') or old_reservation.get('staff')
         calendar_url = self._get_calendar_url(staff_name)
-        message = f"🔄 **予約変更**\n"
-        message += f"• 予約ID: `{old_reservation.get('reservation_id', 'N/A')}`\n"
-        message += f"• お客様: {client_name}\n\n"
         
-        # Show changes
-        changes = []
-        
-        # Date change
-        if old_reservation.get('date') != new_reservation.get('date'):
-            changes.append(f"📅 日付: {old_reservation.get('date', 'N/A')} → {new_reservation.get('date', 'N/A')}")
-        
-        # Time change
+        # Format old reservation time
         old_time = f"{old_reservation.get('start_time', 'N/A')}~{old_reservation.get('end_time', 'N/A')}"
+        # Format new reservation time
         new_time = f"{new_reservation.get('start_time', 'N/A')}~{new_reservation.get('end_time', 'N/A')}"
-        if old_time != new_time:
-            changes.append(f"⏰ 時間: {old_time} → {new_time}")
         
-        # Service change
-        if old_reservation.get('service') != new_reservation.get('service'):
-            changes.append(f"💇 サービス: {old_reservation.get('service', 'N/A')} → {new_reservation.get('service', 'N/A')}")
-        
-        # Staff change
-        if old_reservation.get('staff') != new_reservation.get('staff'):
-            changes.append(f"👨‍💼 担当者: {old_reservation.get('staff', 'N/A')} → {new_reservation.get('staff', 'N/A')}")
-        
-        if changes:
-            message += "**変更内容:**\n" + "\n".join(f"• {change}" for change in changes)
-        else:
-            message += "• 変更は検出されませんでした"
+        message = f"予約変更\n\n"
+        message += f"【元の予約】\n"
+        message += f"• 予約ID: `{old_reservation.get('reservation_id', 'N/A')}`\n"
+        message += f"• 日付: {old_reservation.get('date', 'N/A')}\n"
+        message += f"• 時間: {old_time}\n"
+        message += f"• 担当: {old_reservation.get('staff', 'N/A')}\n"
+        message += f"• メニュー: {old_reservation.get('service', 'N/A')}\n"
+        message += f"→ キャンセル\n\n"
+        message += f"【新しい予約】\n"
+        message += f"• 予約ID: `{new_reservation.get('reservation_id', 'N/A')}`\n"
+        message += f"• 日付: {new_reservation.get('date', 'N/A')}\n"
+        message += f"• 時間: {new_time}\n"
+        message += f"• 担当: {new_reservation.get('staff', 'N/A')}\n"
+        message += f"• メニュー: {new_reservation.get('service', 'N/A')}\n"
+        message += f"→ 登録済み"
         
         return self.send_notification(
             message=message,

@@ -275,7 +275,12 @@ class ReservationFlow:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+            # If this is a modification flow, clear modification flags but don't cancel original reservation
+            # (per specification: user leaving mid-flow should not cancel original reservation)
+            is_modification = self.user_states[user_id].get("is_modification", False)
             del self.user_states[user_id]
+            if is_modification:
+                return "予約変更をキャンセルいたします。元の予約はそのまま有効です。またのご利用をお待ちしております。"
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
         
         state = self.user_states[user_id]
@@ -983,12 +988,43 @@ class ReservationFlow:
                 import traceback
                 traceback.print_exc()
             
-            # Send notification for reservation confirmation
+            # Check if this is a modification (re-reservation)
+            is_modification = self.user_states[user_id].get("is_modification", False)
+            original_reservation = self.user_states[user_id].get("original_reservation")
+            
+            # If this is a modification, cancel the original reservation
+            if is_modification and original_reservation:
+                try:
+                    from api.google_sheets_logger import GoogleSheetsLogger
+                    sheets_logger = GoogleSheetsLogger()
+                    
+                    original_reservation_id = original_reservation["reservation_id"]
+                    original_staff_name = original_reservation.get("staff")
+                    
+                    # Update status in Google Sheets to "Cancelled"
+                    sheets_logger.update_reservation_status(original_reservation_id, "Cancelled")
+                    
+                    # Cancel the Google Calendar event
+                    self.google_calendar.cancel_reservation_by_id(original_reservation_id, original_staff_name)
+                    
+                    print(f"Successfully cancelled original reservation {original_reservation_id} for modification")
+                    
+                except Exception as e:
+                    logging.error(f"Failed to cancel original reservation during modification: {e}")
+                    # Continue with new reservation even if cancellation fails
+            
+            # Send notification
             try:
-                from api.notification_manager import send_reservation_confirmation_notification
-                send_reservation_confirmation_notification(reservation_data, client_name)
+                from api.notification_manager import send_reservation_confirmation_notification, send_reservation_modification_notification
+                
+                if is_modification and original_reservation:
+                    # Send modification notification (not cancellation + confirmation)
+                    send_reservation_modification_notification(original_reservation, reservation_data, client_name)
+                else:
+                    # Send regular confirmation notification
+                    send_reservation_confirmation_notification(reservation_data, client_name)
             except Exception as e:
-                logging.error(f"Failed to send reservation confirmation notification: {e}")
+                logging.error(f"Failed to send notification: {e}")
             
             # Keep reservation data in user state for logging in index.py
             # The user state will be cleared after logging in index.py
@@ -998,8 +1034,31 @@ class ReservationFlow:
             time_display = reservation_data.get('start_time', reservation_data['time'])
             if 'end_time' in reservation_data:
                 time_display = f"{reservation_data['start_time']}~{reservation_data['end_time']}"
-           
-            return f"""✅ 予約が確定いたしました！
+            
+            # Return appropriate message based on whether this is a modification
+            if is_modification and original_reservation:
+                # Modification completion message
+                original_time_display = f"{original_reservation['start_time']}~{original_reservation['end_time']}"
+                return f"""予約変更が完了しました。
+
+【元の予約】
+予約ID：{original_reservation['reservation_id']}
+{original_reservation['date']} / {original_time_display}
+担当：{original_reservation['staff']}
+メニュー：{original_reservation['service']}
+→ キャンセル済み
+
+【新しい予約】
+予約ID：{reservation_id}
+{reservation_data['date']} / {time_display}
+担当：{reservation_data['staff']}
+メニュー：{reservation_data['service']}
+→ 予約済み
+
+ご予約ありがとうございました！"""
+            else:
+                # Regular reservation confirmation message
+                return f"""✅ 予約が確定いたしました！
 
 🆔 予約ID：{reservation_id}
 📅 日時：{reservation_data['date']} {time_display}
@@ -1796,29 +1855,43 @@ class ReservationFlow:
                         break
                 
                 if selected_reservation:
-                    # Store selected reservation and move to field selection
-                    self.user_states[user_id]["reservation_data"] = selected_reservation
-                    self.user_states[user_id]["step"] = "modify_select_field"
+                    # Store original reservation ID for cancellation after new reservation is confirmed
+                    self.user_states[user_id]["original_reservation"] = selected_reservation
+                    self.user_states[user_id]["is_modification"] = True
                     
-                    # Get staff-specific calendar URL
-                    staff_name = selected_reservation.get('staff')
-                    calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
+                    # Start new reservation flow (re-reservation approach)
+                    self.user_states[user_id]["step"] = "service_selection"
+                    self.user_states[user_id]["data"] = {
+                        "user_id": user_id
+                    }
                     
-                    return f"""予約が見つかりました！
+                    # Generate service list from JSON data
+                    service_list = []
+                    for service_id, service_data in self.services.items():
+                        service_name = service_data.get("name", service_id)
+                        duration = service_data.get("duration", 60)
+                        price = service_data.get("price", 3000)
+                        service_list.append(f"・{service_name}（{duration}分・{price:,}円）")
+                    
+                    services_text = "\n".join(service_list)
+                    
+                    return f"""この予約を変更します。
 
-📋 現在の予約内容：
+📋 **現在の予約内容：**
 🆔 予約ID：{selected_reservation['reservation_id']}
 📅 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
 💇 サービス：{selected_reservation['service']}
 👨‍💼 担当者：{selected_reservation['staff']}
 
-🗓️ **Googleカレンダーで予約状況を確認：**
-🔗 {calendar_url}
+新しい予約を作成してください。新しい予約が確定した時点で、元の予約は自動的にキャンセルされます。
 
-何を変更しますか？
-{self._get_modification_menu()}
+どのサービスをご希望ですか？
 
-変更をやめる場合は「キャンセル」とお送りください。"""
+{services_text}
+
+サービス名をお送りください。
+
+※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
                 else:
                     return "申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
             
@@ -1828,29 +1901,43 @@ class ReservationFlow:
                 if 0 <= reservation_index < len(reservations):
                     selected_reservation = reservations[reservation_index]
                     
-                    # Store selected reservation and move to field selection
-                    self.user_states[user_id]["reservation_data"] = selected_reservation
-                    self.user_states[user_id]["step"] = "modify_select_field"
+                    # Store original reservation ID for cancellation after new reservation is confirmed
+                    self.user_states[user_id]["original_reservation"] = selected_reservation
+                    self.user_states[user_id]["is_modification"] = True
                     
-                    # Get staff-specific calendar URL
-                    staff_name = selected_reservation.get('staff')
-                    calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
+                    # Start new reservation flow (re-reservation approach)
+                    self.user_states[user_id]["step"] = "service_selection"
+                    self.user_states[user_id]["data"] = {
+                        "user_id": user_id
+                    }
                     
-                    return f"""予約が見つかりました！
+                    # Generate service list from JSON data
+                    service_list = []
+                    for service_id, service_data in self.services.items():
+                        service_name = service_data.get("name", service_id)
+                        duration = service_data.get("duration", 60)
+                        price = service_data.get("price", 3000)
+                        service_list.append(f"・{service_name}（{duration}分・{price:,}円）")
+                    
+                    services_text = "\n".join(service_list)
+                    
+                    return f"""この予約を変更します。
 
-📋 現在の予約内容：
+📋 **現在の予約内容：**
 🆔 予約ID：{selected_reservation['reservation_id']}
 📅 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
 💇 サービス：{selected_reservation['service']}
 👨‍💼 担当者：{selected_reservation['staff']}
 
-🗓️ **Googleカレンダーで予約状況を確認：**
-🔗 {calendar_url}
+新しい予約を作成してください。新しい予約が確定した時点で、元の予約は自動的にキャンセルされます。
 
-何を変更しますか？
-{self._get_modification_menu()}
+どのサービスをご希望ですか？
 
-変更をやめる場合は「キャンセル」とお送りください。"""
+{services_text}
+
+サービス名をお送りください。
+
+※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
                 else:
                     return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
             else:
