@@ -1839,6 +1839,11 @@ class ReservationFlow:
     def _handle_modify_reservation_selection(self, user_id: str, message: str) -> str:
         """Handle reservation selection for modification"""
         state = self.user_states[user_id]
+        
+        # Check if user_reservations exists, if not, reload reservations
+        if "user_reservations" not in state:
+            return self._show_user_reservations_for_modification(user_id)
+        
         reservations = state["user_reservations"]
         
         try:
