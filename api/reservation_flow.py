@@ -215,6 +215,12 @@ class ReservationFlow:
         # Normalize message: strip whitespace
         message_normalized = message.strip()
         
+        # Shortcut: common phrases that should always trigger modification flow
+        # This ensures that simple inputs like "予約変更" don't fall through to general/FAQ handling
+        if message_normalized in ["予約変更", "予約を変更", "予約変更したい"]:
+            print(f"Detected 'modify' intent (shortcut) for message: '{message_normalized}'")
+            return "modify"
+        
         # Check if user is in reservation flow
         if user_id and user_id in self.user_states:
             state = self.user_states[user_id]
