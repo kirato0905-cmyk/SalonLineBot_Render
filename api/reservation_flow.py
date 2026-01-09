@@ -1214,10 +1214,26 @@ class ReservationFlow:
                 start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
                 end_dt = start_dt + timedelta(minutes=duration)
                 end_time = end_dt.strftime("%H:%M")
-            
+
+            # When this is a modification (re-reservation), allow the original reservation's
+            # own time slot to be reused by excluding it from conflict checks.
+            exclude_reservation_id = None
+            try:
+                if user_id and user_id in self.user_states:
+                    state = self.user_states[user_id]
+                    if state.get("is_modification") and state.get("original_reservation"):
+                        original_reservation = state["original_reservation"]
+                        # Only exclude if it's the same date (same-day modification)
+                        if original_reservation.get("date") == date_str:
+                            exclude_reservation_id = original_reservation.get("reservation_id")
+                            print(f"[Final Availability] Modification flow detected. Excluding original reservation {exclude_reservation_id} from conflict checks.")
+            except Exception as e:
+                # Availability checks should not fail just because state lookup failed
+                logging.error(f"Error detecting modification context in _check_final_availability: {e}")
+
             # Check staff availability for the time slot
             staff_available = self.google_calendar.check_staff_availability_for_time(
-                date_str, start_time, end_time, staff_name
+                date_str, start_time, end_time, staff_name, exclude_reservation_id
             )
             
             if not staff_available:
@@ -1228,7 +1244,7 @@ class ReservationFlow:
             
             # Check if user has another reservation at the same time
             user_conflict = self.google_calendar.check_user_time_conflict(
-                date_str, start_time, end_time, user_id
+                date_str, start_time, end_time, user_id, exclude_reservation_id, staff_name
             )
             
             if user_conflict:
