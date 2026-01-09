@@ -179,16 +179,16 @@ class ReservationFlow:
         
         # If staff_name is provided, use staff-specific availability
         if staff_name:
-            # For modification flow, exclude original reservation ID to include its time slot
+            # For modification flow, pass original reservation ID to exclude_reservation_id
+            # This tells get_available_slots_for_modification to INCLUDE the original reservation time
             exclude_reservation_id = None
             if original_reservation and original_reservation.get("date") == selected_date:
-                # Only exclude if the original reservation is on the same date
+                # Pass original reservation ID so it's excluded from blocking events
                 # This allows the user to select the same time slot
-                exclude_reservation_id = None  # Don't exclude - allow same time selection
-            else:
-                exclude_reservation_id = None
+                exclude_reservation_id = original_reservation.get("reservation_id")
+                print(f"[Get Available Slots] Modification flow: including original reservation time {original_reservation.get('start_time')}~{original_reservation.get('end_time')}")
             
-            # Get staff-specific available slots (without excluding original reservation)
+            # Get staff-specific available slots (original reservation time will be included)
             staff_slots = self.google_calendar.get_available_slots_for_modification(selected_date, exclude_reservation_id, staff_name)
             
             # If this is a modification flow and original reservation is on the same date,
@@ -697,17 +697,33 @@ class ReservationFlow:
 
 ❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
         
+        # Check if this is a modification flow
+        is_modification = self.user_states[user_id].get("is_modification", False)
+        original_reservation = self.user_states[user_id].get("original_reservation") if is_modification else None
+        
         # Format available periods for display
         period_strings = []
         for period in filtered_periods:
             start_time = period["time"]
             end_time = period["end_time"]
-            period_strings.append(f"・{start_time}~{end_time}")
+            # Highlight original reservation time in modification flow
+            if is_modification and original_reservation:
+                if (start_time == original_reservation.get("start_time") and 
+                    end_time == original_reservation.get("end_time")):
+                    period_strings.append(f"・{start_time}~{end_time} ⭐（現在の予約時間）")
+                else:
+                    period_strings.append(f"・{start_time}~{end_time}")
+            else:
+                period_strings.append(f"・{start_time}~{end_time}")
+        
+        modification_note = ""
+        if is_modification and original_reservation:
+            modification_note = f"\n\n💡 現在の予約時間（{original_reservation.get('start_time')}~{original_reservation.get('end_time')}）も選択できます。"
         
         return f"""{selected_date}ですね！
 {service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです：
 
-{chr(10).join(period_strings)}
+{chr(10).join(period_strings)}{modification_note}
 
 ご希望の開始時間をお送りください。
 例）10:00 または 10:30
@@ -819,12 +835,28 @@ class ReservationFlow:
         start_time = self._parse_single_time(message.strip())
         
         if not start_time:
+            # Check if this is a modification flow
+            is_modification = self.user_states[user_id].get("is_modification", False)
+            original_reservation = self.user_states[user_id].get("original_reservation") if is_modification else None
+            
             # Show available periods in error message
             period_strings = []
             for period in filtered_periods:
                 period_start = period["time"]
                 period_end = period["end_time"]
-                period_strings.append(f"・{period_start}~{period_end}")
+                # Highlight original reservation time in modification flow
+                if is_modification and original_reservation:
+                    if (period_start == original_reservation.get("start_time") and 
+                        period_end == original_reservation.get("end_time")):
+                        period_strings.append(f"・{period_start}~{period_end} ⭐（現在の予約時間）")
+                    else:
+                        period_strings.append(f"・{period_start}~{period_end}")
+                else:
+                    period_strings.append(f"・{period_start}~{period_end}")
+            
+            modification_note = ""
+            if is_modification and original_reservation:
+                modification_note = f"\n\n💡 現在の予約時間（{original_reservation.get('start_time')}~{original_reservation.get('end_time')}）も選択できます。"
             
             return f"""時間の入力形式が正しくありません。
 
@@ -835,7 +867,7 @@ class ReservationFlow:
 ・10時30分
 
 {selected_date}の予約可能な時間帯：
-{chr(10).join(period_strings)}
+{chr(10).join(period_strings)}{modification_note}
 
 上記の空き時間から開始時間をお選びください。
 
@@ -1072,16 +1104,26 @@ class ReservationFlow:
                     original_reservation_id = original_reservation["reservation_id"]
                     original_staff_name = original_reservation.get("staff")
                     
+                    print(f"[Modification] Cancelling original reservation: {original_reservation_id}, Staff: {original_staff_name}")
+                    
                     # Update status in Google Sheets to "Cancelled"
-                    sheets_logger.update_reservation_status(original_reservation_id, "Cancelled")
+                    sheets_success = sheets_logger.update_reservation_status(original_reservation_id, "Cancelled")
+                    if sheets_success:
+                        print(f"[Modification] Successfully updated Google Sheets status to Cancelled for {original_reservation_id}")
+                    else:
+                        logging.warning(f"[Modification] Failed to update Google Sheets status for {original_reservation_id}")
                     
                     # Cancel the Google Calendar event
-                    self.google_calendar.cancel_reservation_by_id(original_reservation_id, original_staff_name)
+                    calendar_success = self.google_calendar.cancel_reservation_by_id(original_reservation_id, original_staff_name)
+                    if calendar_success:
+                        print(f"[Modification] Successfully deleted original reservation {original_reservation_id} from Google Calendar")
+                    else:
+                        logging.warning(f"[Modification] Failed to delete original reservation {original_reservation_id} from Google Calendar")
                     
-                    print(f"Successfully cancelled original reservation {original_reservation_id} for modification")
+                    print(f"[Modification] Original reservation cancellation completed - Sheets: {sheets_success}, Calendar: {calendar_success}")
                     
                 except Exception as e:
-                    logging.error(f"Failed to cancel original reservation during modification: {e}")
+                    logging.error(f"Failed to cancel original reservation during modification: {e}", exc_info=True)
                     # Continue with new reservation even if cancellation fails
             
             # Send notification
