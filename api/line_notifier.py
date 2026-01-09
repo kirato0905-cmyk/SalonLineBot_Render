@@ -44,6 +44,9 @@ class LineNotifier:
             else:
                 full_message = f"📢 {message}"
             
+            # Truncate the message if it exceeds 160 characters for template messages
+            truncated_message = full_message[:157] + "..." if len(full_message) > 160 else full_message
+            
             # If calendar_url is provided, use template message with button
             if calendar_url:
                 # Prepare template message with button
@@ -52,10 +55,10 @@ class LineNotifier:
                     "messages": [
                         {
                             "type": "template",
-                            "altText": full_message,
+                            "altText": truncated_message,  # Use truncated message for altText
                             "template": {
                                 "type": "buttons",
-                                "text": full_message,
+                                "text": truncated_message,  # Use truncated message for template text
                                 "actions": [
                                     {
                                         "type": "uri",
