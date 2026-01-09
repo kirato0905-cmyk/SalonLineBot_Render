@@ -92,12 +92,12 @@ class LineNotifier:
                 timeout=10
             )
             
-            if response.status_code == 200:
-                print("LINE notification sent successfully")
-                return True
-            else:
+            if response.status_code != 200:
                 logging.error(f"Failed to send LINE notification: {response.status_code} - {response.text}")
                 return False
+            
+            print("LINE notification sent successfully")
+            return True
                 
         except Exception as e:
             logging.error(f"Error sending LINE notification: {e}")
@@ -331,15 +331,12 @@ def send_reservation_cancellation_notification(reservation_data: Dict[str, Any],
 if __name__ == "__main__":
     # Test the LINE notifier
     notifier = LineNotifier()
-    
-    # Test notification
-    test_message = "🧪 **Test Notification**\nThis is a test message from the salon booking system."
+    test_message = "テスト通知です。LINE通知が正常に動作しているか確認してください。"
     success = notifier.send_notification(
         message=test_message,
-        title="Test"
+        title="テスト通知"
     )
-    
     if success:
-        print("✅ Test notification sent successfully!")
+        print("通知送信成功")
     else:
-        print("❌ Failed to send test notification")
+        print("通知送信失敗")
