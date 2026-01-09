@@ -165,16 +165,57 @@ class ReservationFlow:
         
         return "\n".join(menu_items)
     
-    def _get_available_slots(self, selected_date: str = None, staff_name: str = None) -> List[Dict[str, Any]]:
+    def _get_available_slots(self, selected_date: str = None, staff_name: str = None, user_id: str = None) -> List[Dict[str, Any]]:
         """Get available time slots from Google Calendar for a specific date and staff member"""
         if selected_date is None:
             # If no date specified, get slots for today
             selected_date = datetime.now().strftime("%Y-%m-%d")
         
+        # Check if this is a modification flow - if so, include original reservation time
+        original_reservation = None
+        if user_id and user_id in self.user_states:
+            if self.user_states[user_id].get("is_modification", False):
+                original_reservation = self.user_states[user_id].get("original_reservation")
+        
         # If staff_name is provided, use staff-specific availability
         if staff_name:
-            # Get staff-specific available slots
-            staff_slots = self.google_calendar.get_available_slots_for_modification(selected_date, None, staff_name)
+            # For modification flow, exclude original reservation ID to include its time slot
+            exclude_reservation_id = None
+            if original_reservation and original_reservation.get("date") == selected_date:
+                # Only exclude if the original reservation is on the same date
+                # This allows the user to select the same time slot
+                exclude_reservation_id = None  # Don't exclude - allow same time selection
+            else:
+                exclude_reservation_id = None
+            
+            # Get staff-specific available slots (without excluding original reservation)
+            staff_slots = self.google_calendar.get_available_slots_for_modification(selected_date, exclude_reservation_id, staff_name)
+            
+            # If this is a modification flow and original reservation is on the same date,
+            # add the original reservation time slot to the available slots
+            if original_reservation and original_reservation.get("date") == selected_date:
+                original_start_time = original_reservation.get("start_time")
+                original_end_time = original_reservation.get("end_time")
+                if original_start_time and original_end_time:
+                    # Check if original time slot is already in the list
+                    original_slot_exists = False
+                    for slot in staff_slots:
+                        if slot.get("time") == original_start_time and slot.get("end_time") == original_end_time:
+                            original_slot_exists = True
+                            break
+                    
+                    # Add original time slot if it doesn't exist
+                    if not original_slot_exists:
+                        original_slot = {
+                            "date": selected_date,
+                            "time": original_start_time,
+                            "end_time": original_end_time,
+                            "available": True
+                        }
+                        staff_slots.append(original_slot)
+                        # Sort slots by time
+                        staff_slots.sort(key=lambda x: x.get("time", ""))
+            
             return staff_slots
         
         # Fallback to general availability (for cases where staff is not selected yet)
@@ -188,6 +229,30 @@ class ReservationFlow:
         
         # Filter slots for the specific date
         date_slots = [slot for slot in all_slots if slot["date"] == selected_date]
+        
+        # If this is a modification flow, add original reservation time slot
+        if original_reservation and original_reservation.get("date") == selected_date:
+            original_start_time = original_reservation.get("start_time")
+            original_end_time = original_reservation.get("end_time")
+            if original_start_time and original_end_time:
+                # Check if original time slot is already in the list
+                original_slot_exists = False
+                for slot in date_slots:
+                    if slot.get("time") == original_start_time and slot.get("end_time") == original_end_time:
+                        original_slot_exists = True
+                        break
+                
+                # Add original time slot if it doesn't exist
+                if not original_slot_exists:
+                    original_slot = {
+                        "date": selected_date,
+                        "time": original_start_time,
+                        "end_time": original_end_time,
+                        "available": True
+                    }
+                    date_slots.append(original_slot)
+                    # Sort slots by time
+                    date_slots.sort(key=lambda x: x.get("time", ""))
         
         return date_slots
     
@@ -519,7 +584,7 @@ class ReservationFlow:
         
         # Get available time periods for selected date from Google Calendar
         staff_name = self.user_states[user_id]["data"].get("staff")
-        available_slots = self._get_available_slots(selected_date, staff_name)
+        available_slots = self._get_available_slots(selected_date, staff_name, user_id)
         available_periods = [slot for slot in available_slots if slot["available"]]
 
         # Get service duration
@@ -727,7 +792,7 @@ class ReservationFlow:
         print("[Time Selection] :", staff_name, selected_date)
         # Get available slots with better error handling
         try:
-            available_slots = self._get_available_slots(selected_date, staff_name)
+            available_slots = self._get_available_slots(selected_date, staff_name, user_id)
             available_periods = [slot for slot in available_slots if slot["available"]]
 
             # Get service duration
@@ -845,7 +910,7 @@ class ReservationFlow:
             self.user_states[user_id]["step"] = "time_selection"
             
             # Get available periods again for display
-            available_slots = self._get_available_slots(selected_date, staff_name)
+            available_slots = self._get_available_slots(selected_date, staff_name, user_id)
             available_periods = [slot for slot in available_slots if slot["available"]]
             
             period_strings = []
@@ -1025,12 +1090,20 @@ class ReservationFlow:
                 
                 if is_modification and original_reservation:
                     # Send modification notification (not cancellation + confirmation)
-                    send_reservation_modification_notification(original_reservation, reservation_data, client_name)
+                    print(f"[Notification] Sending modification notification for user {user_id}")
+                    print(f"[Notification] Original reservation: {original_reservation.get('reservation_id')}")
+                    print(f"[Notification] New reservation: {reservation_id}")
+                    notification_success = send_reservation_modification_notification(original_reservation, reservation_data, client_name)
+                    if notification_success:
+                        print(f"[Notification] Modification notification sent successfully")
+                    else:
+                        logging.warning(f"[Notification] Modification notification failed for user {user_id}")
                 else:
                     # Send regular confirmation notification
+                    print(f"[Notification] Sending confirmation notification for user {user_id}")
                     send_reservation_confirmation_notification(reservation_data, client_name)
             except Exception as e:
-                logging.error(f"Failed to send notification: {e}")
+                logging.error(f"Failed to send notification: {e}", exc_info=True)
             
             # Keep reservation data in user state for logging in index.py
             # The user state will be cleared after logging in index.py
