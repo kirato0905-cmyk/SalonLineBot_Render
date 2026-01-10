@@ -45,7 +45,7 @@ class LineNotifier:
                 full_message = f"📢 {message}"
             
             # Truncate the message if it exceeds 160 characters for template messages
-            truncated_message = full_message[:157] + "..." if len(full_message) > 160 else full_message
+            #truncated_message = full_message[:157] + "..." if len(full_message) > 160 else full_message
             
             # If calendar_url is provided, use template message with button
             if calendar_url:
@@ -55,10 +55,11 @@ class LineNotifier:
                     "messages": [
                         {
                             "type": "template",
-                            "altText": truncated_message,  # Use truncated message for altText
+                            "altText": full_message,  # Use truncated message for altText
+                            #"altText": truncated_message,  # Use truncated message for altText
                             "template": {
                                 "type": "buttons",
-                                "text": truncated_message,  # Use truncated message for template text
+                                "text": full_message,  # Use truncated message for template text
                                 "actions": [
                                     {
                                         "type": "uri",
@@ -151,14 +152,12 @@ class LineNotifier:
         
         message = f"予約変更\n\n"
         message += f"【元の予約】\n"
-        message += f"• 予約ID: `{old_reservation.get('reservation_id', 'N/A')}`\n"
         message += f"• 日付: {old_reservation.get('date', 'N/A')}\n"
         message += f"• 時間: {old_time}\n"
         message += f"• 担当: {old_reservation.get('staff', 'N/A')}\n"
         message += f"• メニュー: {old_reservation.get('service', 'N/A')}\n"
         message += f"→ キャンセル\n\n"
         message += f"【新しい予約】\n"
-        message += f"• 予約ID: `{new_reservation.get('reservation_id', 'N/A')}`\n"
         message += f"• 日付: {new_reservation.get('date', 'N/A')}\n"
         message += f"• 時間: {new_time}\n"
         message += f"• 担当: {new_reservation.get('staff', 'N/A')}\n"
