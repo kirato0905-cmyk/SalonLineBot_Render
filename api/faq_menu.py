@@ -9,6 +9,8 @@ from linebot.v3.messaging import (
     TextMessage,
     MessagingApi,
     ApiClient,
+    QuickReply,
+    QuickReplyItem,
 )
  
 def send_faq_menu(reply_token, configuration):
@@ -36,7 +38,9 @@ def send_faq_menu(reply_token, configuration):
         lines.append("")
         lines.append("※質問番号（Q1～Q10）をお送りください。")
 
-        faq_menu_message = TextMessage(text="\n".join(lines))
+        # Quick Reply: Q1～Q10 (no キャンセル per spec 3-1)
+        qr_items = [QuickReplyItem(action=MessageAction(label=f"Q{i}", text=f"Q{i}")) for i in range(1, len(faq_list) + 1)]
+        faq_menu_message = TextMessage(text="\n".join(lines), quick_reply=QuickReply(items=qr_items) if qr_items else None)
  
         with ApiClient(configuration) as api_client:
             MessagingApi(api_client).reply_message(
