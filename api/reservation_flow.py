@@ -2060,8 +2060,16 @@ class ReservationFlow:
             
             # Create reservation list (show max 5 future reservations)
             reservation_list = []
+            quick_reply_items = []
             for i, res in enumerate(future_reservations[:5], 1):
-                reservation_list.append(f"{i}️⃣ {res['date']} {res['start_time']}~{res['end_time']} - {res['service']} ({res['reservation_id']})")
+                reservation_list.append(
+                    f"{i}️⃣ {res['date']} {res['start_time']}~{res['end_time']} - {res['service']} ({res['reservation_id']})"
+                )
+                # Quick Reply item: tap to send reservation ID (spec: 予約番号ボタン)
+                quick_reply_items.append({
+                    "label": f"{i}️⃣",
+                    "text": res["reservation_id"]
+                })
             
             text = f"""ご予約の変更ですね。
 
@@ -2075,7 +2083,8 @@ class ReservationFlow:
 例）RES-20250115-0001
 
 変更をやめる場合は「キャンセル」とお送りください。"""
-            return self._quick_reply_return(text, [])
+            # Quick Reply: reservation buttons + キャンセル
+            return self._quick_reply_return(text, quick_reply_items)
             
         except Exception as e:
             logging.error(f"Failed to show user reservations for modification: {e}")
