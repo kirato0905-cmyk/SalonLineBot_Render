@@ -1,0 +1,36 @@
+[
+  {
+    "staff_id": "staff_1",
+    "name": "山田",
+    "role": "スタイリスト",
+    "image_url": "https://img.freepik.com/free-photo/female-stylist-posing-japanese-hairdressers_23-2149395766.jpg?ga=GA1.1.1418348828.1760984570&semt=ais_user_personalization&w=740&q=80",
+    "strength_styles": ["カット", "カラー"],
+    "comment": "お客様一人ひとりに似合うスタイルをご提案いたします。",
+    "sns": { "instagram": "https://www.instagram.com/sample_stylist1" },
+    "is_active": true,
+    "order": 1
+  },
+  {
+    "staff_id": "staff_2",
+    "name": "佐藤",
+    "role": "トップスタイリスト",
+    "image_url": "https://img.freepik.com/free-photo/woman-getting-her-hair-done-japanese-hairdressers_23-2149395782.jpg?ga=GA1.1.1418348828.1760984570&semt=ais_user_personalization&w=740&q=80",
+    "strength_styles": ["パーマ", "トリートメント"],
+    "comment": "髪のお悩みは何でもご相談ください。",
+    "sns": { "instagram": "" },
+    "is_active": true,
+    "order": 2
+  },
+  {
+    "staff_id": "staff_3",
+    "name": "鈴木",
+    "role": "アシスタント",
+    "image_url": "https://img.freepik.com/premium-photo/woman-getting-her-hr-done-japanese-hrdressers_1346048-35505.jpg?ga=GA1.1.1418348828.1760984570&semt=ais_user_personalization&w=740&q=80",
+    "strength_styles": [],
+    "comment": "気持ちの良いシャンプーと接客を心がけています。",
+    "sns": {},
+    "is_active": true,
+    "order": 3
+  }
+]
+

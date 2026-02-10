@@ -17,6 +17,7 @@ from api.google_sheets_logger import GoogleSheetsLogger
 from api.reminder_scheduler import reminder_scheduler
 from api.faq_menu import send_faq_menu, send_faq_answer, send_faq_answer_by_item, get_faq_by_number
 from api.service_menu import send_service_menu
+from api.staff_intro import send_staff_intro
 
 load_dotenv()
 
@@ -220,6 +221,33 @@ def handle_message(event: MessageEvent):
                     )
                 return
 
+        # Handle staff introduction (rich menu: スタッフ紹介)
+        if message_text == "スタッフ紹介":
+            try:
+                send_staff_intro(event.reply_token, configuration)
+                action_type = "staff_intro"
+                if sheets_logger:
+                    sheets_logger.log_message(
+                        user_id=user_id,
+                        user_message=message_text,
+                        bot_response="Staff intro displayed",
+                        user_name=user_name,
+                        message_type="flex",
+                        action_type=action_type,
+                        processing_time=(time.time() - start_time) * 1000,
+                    )
+                return
+            except Exception as e:
+                logging.error(f"Failed to send staff intro: {e}", exc_info=True)
+                with ApiClient(configuration) as api_client:
+                    MessagingApi(api_client).reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text="現在スタッフ紹介を表示できません。しばらくしてから再度お試しください。")]
+                        )
+                    )
+                return
+
         # Handle FAQ menu and answers
         if message_text == "よくある質問":
             try:
@@ -302,7 +330,13 @@ def handle_message(event: MessageEvent):
         else:
             # 1. Try reservation flow first (highest priority)
             if reservation_flow:
-                reservation_reply = reservation_flow.get_response(user_id, message_text)
+                # Special handling: start reservation with preselected staff from staff intro
+                if message_text.startswith("このスタッフで予約する:"):
+                    staff_id = message_text.split(":", 1)[1].strip()
+                    reservation_reply = reservation_flow.start_reservation_with_staff(user_id, staff_id)
+                else:
+                    reservation_reply = reservation_flow.get_response(user_id, message_text)
+
                 if reservation_reply:
                     # Support Quick Reply: reply can be dict with "text" and "quick_reply_items"
                     if isinstance(reservation_reply, dict) and "text" in reservation_reply:

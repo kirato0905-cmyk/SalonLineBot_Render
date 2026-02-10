@@ -466,6 +466,38 @@ class ReservationFlow:
 
         # Reuse the standard handler by sending the resolved service name as input
         return self._handle_service_selection(user_id, service_name)
+
+    def start_reservation_with_staff(self, user_id: str, staff_identifier: str) -> str:
+        """Start a reservation flow with a preselected staff.
+
+        staff_identifier can be a staff_id (e.g., 'staff_1') or staff name (e.g., '山田').
+        """
+        # Resolve staff name from staff_members
+        staff_name = None
+        # Try by staff_id key
+        if staff_identifier in self.staff_members:
+            staff_name = self.staff_members[staff_identifier].get("name", staff_identifier)
+        else:
+            # Try by matching name
+            for sid, sdata in self.staff_members.items():
+                if sdata.get("name") == staff_identifier:
+                    staff_name = sdata.get("name")
+                    break
+
+        if not staff_name:
+            return "申し訳ございませんが、選択されたスタッフは現在ご指定いただけません。"
+
+        # Initialize user state with preselected staff
+        self.user_states[user_id] = {
+            "step": "service_selection",
+            "data": {
+                "user_id": user_id,
+                "staff": staff_name,
+            }
+        }
+
+        # Reuse standard flow starting from service selection
+        return self._start_reservation(user_id)
     
     def _handle_service_selection(self, user_id: str, message: str) -> str:
         """Handle service selection"""
@@ -510,6 +542,29 @@ class ReservationFlow:
             return self._quick_reply_return(text, menu_items)
         
         self.user_states[user_id]["data"]["service"] = selected_service
+        
+        # If staff is already preselected (e.g., from staff introduction flow), skip staff selection
+        preselected_staff = self.user_states[user_id]["data"].get("staff")
+        if preselected_staff:
+            self.user_states[user_id]["data"]["staff"] = preselected_staff
+            self.user_states[user_id]["step"] = "date_selection"
+            staff_calendar_url = self._get_staff_calendar_url(preselected_staff)
+            staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
+            text = f"""{selected_service}ですね！
+担当は{staff_display}で承ります。
+
+ご希望の日付をお選びください。
+📅 **Googleカレンダーで空き状況を確認してください：**
+🔗 {staff_calendar_url}
+
+💡 **手順：**
+1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
+2️⃣ 空いている日付を確認
+3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
+📝 例：`2025-01-15`
+
+❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
+            return self._quick_reply_return(text, [])
         
         # Check if there's only one staff member
         if self._has_single_staff():
