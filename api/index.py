@@ -508,13 +508,26 @@ def handle_postback(event: PostbackEvent):
     else:
         reply_text = "選択内容を処理できませんでした。"
 
+    # Normalize reply: reservation flow may return dict with text + quick_reply_items
+    if isinstance(reply_text, dict) and "text" in reply_text:
+        reply_body = reply_text["text"]
+        quick_reply_items = reply_text.get("quick_reply_items") or []
+    else:
+        reply_body = reply_text if isinstance(reply_text, str) else str(reply_text)
+        quick_reply_items = []
+
     # Send reply
     try:
+        if quick_reply_items and len(quick_reply_items) <= 13:
+            qr_items = [QuickReplyItem(action=MessageAction(label=item["label"], text=item["text"])) for item in quick_reply_items]
+            text_message = TextMessage(text=reply_body, quick_reply=QuickReply(items=qr_items))
+        else:
+            text_message = TextMessage(text=reply_body)
         with ApiClient(configuration) as api_client:
             MessagingApi(api_client).reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply_text)]
+                    messages=[text_message]
                 )
             )
     except Exception as e:
@@ -535,7 +548,7 @@ def handle_postback(event: PostbackEvent):
         sheets_logger.log_message(
             user_id=user_id,
             user_message=f"[postback] {postback_data}",
-            bot_response=reply_text,
+            bot_response=reply_body,
             user_name=user_name,
             message_type="postback",
             action_type=action_type,

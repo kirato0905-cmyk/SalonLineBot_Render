@@ -1619,8 +1619,11 @@ class ReservationFlow:
             
             # Create reservation list (show max 5 future reservations)
             reservation_list = []
+            quick_reply_items = []
             for i, res in enumerate(future_reservations[:5], 1):
                 reservation_list.append(f"{i}️⃣ {res['date']} {res['start_time']}~{res['end_time']} - {res['service']} ({res['reservation_id']})")
+                # Quick Reply: tap to send reservation number (or ID) for quick cancel selection
+                quick_reply_items.append({"label": f"{i}️⃣", "text": str(i)})
             
             text = f"""ご予約のキャンセルですね。
 
@@ -1634,7 +1637,7 @@ class ReservationFlow:
 例）RES-20250115-0001
 
 ❌ 取り消しをやめる場合は「キャンセル」とお送りください"""
-            return self._quick_reply_return(text, [])
+            return self._quick_reply_return(text, quick_reply_items)
             
         except Exception as e:
             logging.error(f"Failed to show user reservations for cancellation: {e}")
