@@ -27,6 +27,13 @@
       "duration": 90,
       "price": 7000,
       "description": "トリートメントサービス"
+    },
+    "service_5": {
+      "id": "cut_color",
+      "name": "カット＋カラー",
+      "duration": 150,
+      "price": 10000,
+      "description": "カットとカラーのセットメニュー"
     }
   },
    "staff": {
