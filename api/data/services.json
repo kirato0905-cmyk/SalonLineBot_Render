@@ -22,11 +22,11 @@
       "description": "パーマサービス"
     },
     "service_4": {
-      "id": "cut+color",
-      "name": "カット＋カラー",
-      "duration": 150,
-      "price": 10000,
-      "description": "ヘアカット＋カラーサービス"
+      "id": "treatment",
+      "name": "トリートメント",
+      "duration": 90,
+      "price": 7000,
+      "description": "トリートメントサービス"
     }
   },
    "staff": {
@@ -47,7 +47,7 @@
       "calendar_id": "62e2e039668e3997d19038833582d81a71c7b787cc34dc853eb8c22a2e4ed7b5@group.calendar.google.com"
     },
     "staff_3": {
-      "name": "高橋",
+      "name": "鈴木",
       "specialty": "カット・パーマ",
       "experience": "7年",
       "email_env": "1658be0b1d3b4707b5488522d51f533ad47ec794977181ef1050a629c2cf1da6@group.calendar.google.com",
