@@ -13,6 +13,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 
+from api.business_hours import get_hours_for_date, is_closed_date
+
 class GoogleCalendarHelper:
     def __init__(self):
         load_dotenv()
@@ -604,59 +606,55 @@ class GoogleCalendarHelper:
             return self._generate_fallback_slots(start_date, end_date)
     
     def _generate_all_slots(self, start_date: datetime, end_date: datetime, events: list = None) -> list:
-        """Generate available time periods based on gaps between existing reservations"""
+        """Generate available time periods from settings.json business hours, excluding existing events."""
         slots = []
         current_date = start_date.date()
         end_date_only = end_date.date()
-        
-        # Business hours: 9:00~12:00, 13:00~18:00 (skip 12:00~13:00 lunch break)
-        business_periods = [
-            {"start": 9, "end": 12},   # 9:00 ~ 12:00
-            {"start": 13, "end": 18}   # 13:00 ~ 18:00
-        ]
-        
+
         while current_date <= end_date_only:
             print(f"[Generate All Slots] Current date: {current_date}")
-            # Skip Sundays (weekday 6)
-            if current_date.weekday() != 6:
-                # Get events for this specific date
-                date_events = []
-                if events:
-                    for event in events:
-                        event_start = datetime.fromisoformat(event['start'].get('dateTime', event['start'].get('date', '')))
-                        if event_start.date() == current_date:
-                            date_events.append(event)
-                
-                # Sort events by start time
-                date_events.sort(key=lambda e: datetime.fromisoformat(e['start'].get('dateTime', e['start'].get('date', ''))))
-                
-                # Find available periods for each business period
-                for business_period in business_periods:
-                    print("calling _find_available_periods")
-                    available_periods = self._find_available_periods(
-                        current_date, business_period, date_events
-                    )
-                    # Add available periods as slots
-                    for period in available_periods:
-                        slots.append({
-                            "date": current_date.strftime("%Y-%m-%d"),
-                            "time": period["start"],
-                            "end_time": period["end"],
-                            "available": True
-                        })
-            
+            if is_closed_date(current_date):
+                current_date += timedelta(days=1)
+                continue
+
+            business_periods = get_hours_for_date(current_date)
+            if not business_periods:
+                current_date += timedelta(days=1)
+                continue
+
+            date_events = []
+            if events:
+                for event in events:
+                    event_start = datetime.fromisoformat(event['start'].get('dateTime', event['start'].get('date', '')))
+                    if event_start.date() == current_date:
+                        date_events.append(event)
+            date_events.sort(key=lambda e: datetime.fromisoformat(e['start'].get('dateTime', e['start'].get('date', ''))))
+
+            for business_period in business_periods:
+                available_periods = self._find_available_periods(
+                    current_date, business_period, date_events
+                )
+                for period in available_periods:
+                    slots.append({
+                        "date": current_date.strftime("%Y-%m-%d"),
+                        "time": period["start"],
+                        "end_time": period["end"],
+                        "available": True
+                    })
+
             current_date += timedelta(days=1)
-        
+
         return slots
     
     def _find_available_periods(self, date, business_period, events):
-        """Find available time periods within business hours, excluding existing events"""
-        available_periods = []
-        
-        # Convert business period to datetime objects
+        """Find available time periods within business hours, excluding existing events.
+        business_period: {"start": "HH:MM", "end": "HH:MM"} from settings.json.
+        """
         tz = pytz.timezone(self.timezone)
-        business_start = tz.localize(datetime.combine(date, datetime.min.time().replace(hour=business_period["start"])))
-        business_end = tz.localize(datetime.combine(date, datetime.min.time().replace(hour=business_period["end"])))
+        start_str = business_period.get("start", "00:00")
+        end_str = business_period.get("end", "23:59")
+        business_start = tz.localize(datetime.combine(date, datetime.strptime(start_str, "%H:%M").time()))
+        business_end = tz.localize(datetime.combine(date, datetime.strptime(end_str, "%H:%M").time()))
         
         print(f"[Find Periods] Business: {business_start.strftime('%H:%M')} ~ {business_end.strftime('%H:%M')}, Events: {len(events)}")
         
@@ -706,21 +704,18 @@ class GoogleCalendarHelper:
             return slots
         except Exception as e:
             print(f"[Fallback] Error generating fallback slots: {e}")
-            # Return minimal fallback slots
-            return [
-                {
-                    "date": start_date.strftime("%Y-%m-%d"),
-                    "time": "09:00",
-                    "end_time": "12:00",
-                    "available": True
-                },
-                {
-                    "date": start_date.strftime("%Y-%m-%d"),
-                    "time": "13:00",
-                    "end_time": "18:00",
-                    "available": True
-                }
-            ]
+            # Return minimal fallback from settings.json business hours for start_date
+            fallback = []
+            d = start_date.date()
+            if not is_closed_date(d):
+                for slot in get_hours_for_date(d):
+                    fallback.append({
+                        "date": d.strftime("%Y-%m-%d"),
+                        "time": slot["start"],
+                        "end_time": slot["end"],
+                        "available": True
+                    })
+            return fallback if fallback else []
     
     def get_calendar_url(self, staff_name: str = None) -> str:
         """Get the public Google Calendar URL for viewing availability (staff-specific)"""

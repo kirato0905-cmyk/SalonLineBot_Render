@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import logging
 from api.google_calendar import GoogleCalendarHelper
+from api.business_hours import get_slot_minutes, is_open_date, get_max_end_time_for_date
 
 class ReservationFlow:
     def __init__(self):
@@ -103,7 +104,8 @@ class ReservationFlow:
         return {"text": text, "quick_reply_items": items}
 
     def _build_time_options_30min(self, filtered_periods: List[Dict], service_duration_minutes: int) -> List[str]:
-        """Build list of start times in 30-min increments that fit service duration within each period."""
+        """Build list of start times in slot_minutes increments that fit service duration within each period (no cross-slot)."""
+        slot_minutes = get_slot_minutes()
         start_times_set = set()
         for period in filtered_periods:
             p_start = period["time"]
@@ -117,7 +119,7 @@ class ReservationFlow:
                 while t + service_duration_minutes <= end_min:
                     h, m = divmod(t, 60)
                     start_times_set.add(f"{h:02d}:{m:02d}")
-                    t += 30
+                    t += slot_minutes
             except (ValueError, KeyError):
                 continue
         return sorted(start_times_set)
@@ -690,7 +692,16 @@ class ReservationFlow:
         
         if not selected_date:
             return self._quick_reply_return("申し訳ございませんが、日付の形式が正しくありません。\n「YYYY-MM-DD」の形式で入力してください。\n例）2025-01-15", [])
-        
+
+        try:
+            date_obj = datetime.strptime(selected_date, "%Y-%m-%d").date()
+        except ValueError:
+            return self._quick_reply_return("申し訳ございませんが、日付の形式が正しくありません。\n「YYYY-MM-DD」の形式で入力してください。\n例）2025-01-15", [])
+        if date_obj < datetime.now().date():
+            return self._quick_reply_return("過去の日付は選択できません。\n本日以降の日付を入力してください。\n\n❌ 予約をキャンセルする場合は「キャンセル」と送信", [])
+        if not is_open_date(date_obj):
+            return self._quick_reply_return(f"申し訳ございませんが、{selected_date}は休業日です。\n別の日付をお選びください。\n\n❌ 予約をキャンセルする場合は「キャンセル」と送信", [])
+
         self.user_states[user_id]["data"]["date"] = selected_date
         self.user_states[user_id]["step"] = "time_selection"
         
@@ -2479,8 +2490,6 @@ class ReservationFlow:
 📅 日付の形式：YYYY-MM-DD
 例）2025-10-20
 
-※ 土曜日と日曜日は定休日です。
-
 変更をやめる場合は「キャンセル」とお送りください。"""
         else:
             return """番号を選択してください：
@@ -2503,11 +2512,11 @@ class ReservationFlow:
         try:
             new_date = message.strip()
             date_obj = datetime.strptime(new_date, "%Y-%m-%d")
-            
-            # Check if it's not Sunday (weekday 6)
-            if date_obj.weekday() == 6:
-                return "申し訳ございませんが、日曜日は定休日です。\n別の日付を選択してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
-            
+            d = date_obj.date()
+
+            if not is_open_date(d):
+                return "申し訳ございませんが、その日は休業日です。\n別の日付を選択してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
+
             # Check if date is in the future
             if date_obj.date() < datetime.now().date():
                 return "過去の日付は選択できません。\n本日以降の日付を入力してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
@@ -3247,16 +3256,18 @@ class ReservationFlow:
             start_dt_for_service = datetime.strptime(reservation["start_time"], "%H:%M")
             new_end_time = (start_dt_for_service + timedelta(minutes=new_duration)).strftime("%H:%M")
             
-            # Check if new end time exceeds business hours (18:00)
-            new_end_dt = datetime.strptime(new_end_time, "%H:%M")
-            business_end_dt = datetime.strptime("18:00", "%H:%M")
-            
-            if new_end_dt > business_end_dt:
-                return f"""申し訳ございませんが、{new_service}（{new_duration}分）は営業時間外になってしまいます。
+            # Check if new end time exceeds business hours (from settings.json)
+            res_date = datetime.strptime(reservation["date"], "%Y-%m-%d").date()
+            business_end_str = get_max_end_time_for_date(res_date)
+            if business_end_str:
+                new_end_dt = datetime.strptime(new_end_time, "%H:%M")
+                business_end_dt = datetime.strptime(business_end_str, "%H:%M")
+                if new_end_dt > business_end_dt:
+                    return f"""申し訳ございませんが、{new_service}（{new_duration}分）は営業時間外になってしまいます。
 
 📅 予約日時：{reservation['date']} {reservation['start_time']}
 ⏰ 新しい終了時刻：{new_end_time}
-🕕 営業終了時刻：18:00
+🕕 営業終了時刻：{business_end_str}
 
 より短い時間のサービスをご選択いただくか、別の時間帯をご検討ください。"""
                 
