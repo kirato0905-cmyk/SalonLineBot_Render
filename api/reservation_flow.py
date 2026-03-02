@@ -81,20 +81,42 @@ class ReservationFlow:
         except (ValueError, IndexError):
             return start_time
     
+    def _get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
+        """Get service dict by id field (e.g. 'cut', 'cut_color'). services keys are service_1, service_2..."""
+        if not service_id:
+            return None
+        normalized = str(service_id).strip()
+        for _key, data in self.services.items():
+            if isinstance(data, dict) and data.get("id") and str(data.get("id")).lower() == normalized.lower():
+                return data
+        return None
+
     def _get_service_name_by_id(self, service_id: str) -> str:
-        """Get service name by ID"""
-        return self.services.get(service_id, {}).get("name", service_id)
-    
+        """Get service name by ID (id field). Display use only; internal processing uses service_id."""
+        svc = self._get_service_by_id(service_id)
+        return svc.get("name", service_id) if svc else service_id
+
+    def _get_current_service_id(self, user_id: str) -> Optional[str]:
+        """Get current service_id from state. Supports legacy state with 'service' (name) by resolving to id."""
+        data = self.user_states.get(user_id, {}).get("data", {})
+        sid = data.get("service_id")
+        if sid:
+            return sid
+        name = data.get("service")
+        if name:
+            return self._get_service_id_by_name(name)
+        return None
+
     def _get_staff_name_by_id(self, staff_id: str) -> str:
         """Get staff name by ID"""
         return self.staff_members.get(staff_id, {}).get("name", staff_id)
     
-    def _get_service_id_by_name(self, service_name: str) -> str:
-        """Get service ID by name"""
-        for service_id, service_data in self.services.items():
-            if service_data.get("name") == service_name:
-                return service_id
-        return service_name
+    def _get_service_id_by_name(self, service_name: str) -> Optional[str]:
+        """Get service id (id field) by name. For fallback/legacy."""
+        for _key, service_data in self.services.items():
+            if isinstance(service_data, dict) and service_data.get("name") == service_name:
+                return service_data.get("id")
+        return None
 
     def _quick_reply_return(self, text: str, items: List[Dict[str, str]], include_cancel: bool = True) -> Dict[str, Any]:
         """Build return dict with text and quick_reply_items for LINE Quick Reply. Items are [{"label": str, "text": str}]."""
@@ -428,46 +450,55 @@ class ReservationFlow:
         else:
             return "予約フローに問題が発生しました。最初からやり直してください。"
     
-    def _start_reservation(self, user_id: str) -> str:
-        """Start reservation process"""
+    def _start_reservation(self, user_id: str) -> Union[str, Dict[str, Any]]:
+        """Start reservation process. Quick Reply is postback (action=select_service&service_id=...). Spec 3-1."""
         self.user_states[user_id]["step"] = "service_selection"
-        
-        # Generate service list from JSON data
         service_list = []
-        for service_id, service_data in self.services.items():
-            service_name = service_data.get("name", service_id)
-            duration = service_data.get("duration", 60)
-            price = service_data.get("price", 3000)
-            service_list.append(f"・{service_name}（{duration}分・{price:,}円）")
-        
+        for _key, data in self.services.items():
+            if isinstance(data, dict) and data.get("id"):
+                name = data.get("name", data.get("id"))
+                duration = data.get("duration", 60)
+                price = data.get("price", 3000)
+                service_list.append(f"・{name}（{duration}分・{price:,}円）")
         services_text = "\n".join(service_list)
-        # Quick Reply: menu candidates + キャンセル (from spec 5-1 ①)
-        menu_items = [{"label": s.get("name", sid), "text": s.get("name", sid)} for sid, s in self.services.items()]
+        menu_items = self._build_service_quick_reply_postback_items()
         text = f"""ご予約ありがとうございます！
 どのサービスをご希望ですか？
 
 {services_text}
 
-サービス名をお送りください。
+下のボタンからメニューをお選びください。
 
 ※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
         return self._quick_reply_return(text, menu_items)
 
-    def start_reservation_with_service(self, user_id: str, service_identifier: str) -> str:
-        """Start a reservation flow with a preselected service (e.g., from a Flex postback)."""
-        service_name = self._resolve_service_name(service_identifier)
-        if not service_name:
-            return "申し訳ございませんが、選択されたメニューは現在ご用意がありません。"
+    def _build_service_quick_reply_postback_items(self, include_cancel: bool = True) -> List[Dict[str, str]]:
+        """Build Quick Reply items with postback (action=select_service&service_id=...) for each service. Spec 3-1."""
+        items = []
+        for _key, data in self.services.items():
+            if isinstance(data, dict) and data.get("id"):
+                sid = data.get("id")
+                name = data.get("name", sid)
+                items.append({"label": name, "type": "postback", "data": f"action=select_service&service_id={sid}"})
+        if include_cancel:
+            items.append({"label": "キャンセル", "text": "キャンセル"})
+        return items
 
+    def start_reservation_with_service(self, user_id: str, service_identifier: str) -> Union[str, Dict[str, Any]]:
+        """Start reservation with service_id from postback only. No name/string matching. Spec 3-2."""
+        if not service_identifier or not str(service_identifier).strip():
+            text = "メニューを選び直してください。"
+            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items())
+        service_id = str(service_identifier).strip()
+        svc = self._get_service_by_id(service_id)
+        if not svc:
+            text = "メニューを選び直してください。"
+            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items())
         self.user_states[user_id] = {
             "step": "service_selection",
-            "data": {
-                "user_id": user_id
-            }
+            "data": {"user_id": user_id, "service_id": service_id}
         }
-
-        # Reuse the standard handler by sending the resolved service name as input
-        return self._handle_service_selection(user_id, service_name)
+        return self._reply_after_service_selected(user_id)
 
     def start_reservation_with_staff(self, user_id: str, staff_identifier: str) -> str:
         """Start a reservation flow with a preselected staff.
@@ -500,59 +531,18 @@ class ReservationFlow:
 
         # Reuse standard flow starting from service selection
         return self._start_reservation(user_id)
-    
-    def _handle_service_selection(self, user_id: str, message: str) -> str:
-        """Handle service selection"""
-        # Check for flow cancellation first
-        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        message_normalized = message.strip()
-        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
-            del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
-        
-        selected_service = None
-        
-        # Service matching using JSON data
-        for service_id, service_data in self.services.items():
-            service_name = service_data.get("name", service_id)
-            if service_name.lower() in message_normalized.lower():
-                selected_service = service_name
-                break
-        
-        # Also check for English keywords
-        if not selected_service:
-            service_mapping = {
-                "cut": "カット",
-                "color": "カラー",
-                "perm": "パーマ",
-                "treatment": "トリートメント"
-            }
-            
-            for keyword, service_name in service_mapping.items():
-                if keyword.lower() in message_normalized.lower():
-                    selected_service = service_name
-                    break
-        
-        if not selected_service:
-            # Re-show menu with Quick Reply (menu + キャンセル)
-            menu_items = [{"label": s.get("name", sid), "text": s.get("name", sid)} for sid, s in self.services.items()]
-            service_list = []
-            for service_id, service_data in self.services.items():
-                sn = service_data.get("name", service_id)
-                service_list.append(f"・{sn}（{service_data.get('duration', 60)}分・{service_data.get('price', 3000):,}円）")
-            text = "申し訳ございませんが、そのサービスは提供しておりません。上記のサービスからお選びください。\n\n" + "\n".join(service_list)
-            return self._quick_reply_return(text, menu_items)
-        
-        self.user_states[user_id]["data"]["service"] = selected_service
-        
-        # If staff is already preselected (e.g., from staff introduction flow), skip staff selection
+
+    def _reply_after_service_selected(self, user_id: str) -> Union[str, Dict[str, Any]]:
+        """Build reply after service is chosen (service_id in state). Staff or date selection."""
+        service_id = self.user_states[user_id]["data"].get("service_id")
+        service_name = self._get_service_name_by_id(service_id) if service_id else ""
         preselected_staff = self.user_states[user_id]["data"].get("staff")
         if preselected_staff:
             self.user_states[user_id]["data"]["staff"] = preselected_staff
             self.user_states[user_id]["step"] = "date_selection"
             staff_calendar_url = self._get_staff_calendar_url(preselected_staff)
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
-            text = f"""{selected_service}ですね！
+            text = f"""{service_name}ですね！
 担当は{staff_display}で承ります。
 
 ご希望の日付をお選びください。
@@ -567,15 +557,12 @@ class ReservationFlow:
 
 ❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
             return self._quick_reply_return(text, [])
-        
-        # Check if there's only one staff member
         if self._has_single_staff():
-            # Automatically assign the single staff member
             single_staff_name = self._get_single_staff_name()
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
             staff_calendar_url = self._get_staff_calendar_url(single_staff_name)
-            text = f"""{selected_service}ですね！
+            text = f"""{service_name}ですね！
 担当は{single_staff_name}さんで承ります。
 
 ご希望の日付をお選びください。
@@ -590,19 +577,17 @@ class ReservationFlow:
 
 ❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
             return self._quick_reply_return(text, [])
-        else:
-            # Multiple staff members - show selection (Quick Reply: staff + キャンセル)
-            self.user_states[user_id]["step"] = "staff_selection"
-            staff_list = []
-            staff_items = []
-            for staff_id, staff_data in self.staff_members.items():
-                staff_name = staff_data.get("name", staff_id)
-                specialty = staff_data.get("specialty", "")
-                experience = staff_data.get("experience", "")
-                staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
-                staff_items.append({"label": staff_name, "text": staff_name})
-            staff_text = "\n".join(staff_list)
-            text = f"""{selected_service}ですね！
+        self.user_states[user_id]["step"] = "staff_selection"
+        staff_list = []
+        staff_items = []
+        for staff_id, staff_data in self.staff_members.items():
+            staff_name = staff_data.get("name", staff_id)
+            specialty = staff_data.get("specialty", "")
+            experience = staff_data.get("experience", "")
+            staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
+            staff_items.append({"label": staff_name, "text": staff_name})
+        staff_text = "\n".join(staff_list)
+        text = f"""{service_name}ですね！
 担当の美容師をお選びください。
 
 {staff_text}
@@ -610,7 +595,63 @@ class ReservationFlow:
 美容師名をお送りください。
 
 ❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
-            return self._quick_reply_return(text, staff_items)
+        return self._quick_reply_return(text, staff_items)
+
+    def _normalize_service_input(self, text: str) -> str:
+        """Spec 5-1: 全角＋→半角+, 全角スペース→半角, 連続スペース1つ, 記号前後スペース削除, 前後トリム."""
+        if not text:
+            return ""
+        s = str(text)
+        s = s.replace("＋", "+").replace("\u3000", " ")
+        s = re.sub(r"\s+", " ", s)
+        s = re.sub(r"\s*([+])\s*", r"\1", s)
+        return s.strip()
+
+    def _fallback_match_service_by_text(self, normalized_input: str) -> List[tuple]:
+        """Fallback: (1) exact name (2) normalized name exact (3) name length descending partial. Returns [(service_id, service_dict), ...]."""
+        all_services = []
+        for _key, data in self.services.items():
+            if not isinstance(data, dict) or not data.get("id"):
+                continue
+            name = data.get("name", "")
+            if not name:
+                continue
+            all_services.append((data.get("id"), data))
+        if not all_services:
+            return []
+        for sid, data in all_services:
+            name = data.get("name", "")
+            norm_name = self._normalize_service_input(name)
+            if normalized_input == name or normalized_input == norm_name:
+                return [(sid, data)]
+        sorted_by_len = sorted(all_services, key=lambda x: len(x[1].get("name", "")), reverse=True)
+        partial_matches = []
+        for sid, data in sorted_by_len:
+            name = data.get("name", "")
+            norm_name = self._normalize_service_input(name)
+            if normalized_input in name or normalized_input in norm_name or name in normalized_input or norm_name in normalized_input:
+                partial_matches.append((sid, data))
+        return partial_matches
+
+    def _handle_service_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        """Handle service selection. Fallback text matching only when not from postback. Spec 5."""
+        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
+        raw = message.strip()
+        if any(keyword in raw for keyword in flow_cancel_keywords):
+            del self.user_states[user_id]
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+        normalized_input = self._normalize_service_input(raw)
+        matches = self._fallback_match_service_by_text(normalized_input)
+        if not matches:
+            text = "メニューを選択してください。"
+            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items())
+        if len(matches) > 1:
+            items = [{"label": m[1].get("name", m[0]), "type": "postback", "data": f"action=select_service&service_id={m[0]}"} for m in matches]
+            items.append({"label": "キャンセル", "text": "キャンセル"})
+            return self._quick_reply_return("複数該当しました。どちらにしますか？", items)
+        service_id, _ = matches[0]
+        self.user_states[user_id]["data"]["service_id"] = service_id
+        return self._reply_after_service_selected(user_id)
     
     def _handle_staff_selection(self, user_id: str, message: str) -> str:
         """Handle staff selection"""
@@ -710,14 +751,11 @@ class ReservationFlow:
         available_slots = self._get_available_slots(selected_date, staff_name, user_id)
         available_periods = [slot for slot in available_slots if slot["available"]]
 
-        # Get service duration
-        service_name = self.user_states[user_id]["data"].get("service")
-        service_info = {}
-        for service_id, service_data in self.services.items():
-            if service_data.get("name") == service_name:
-                service_info = service_data
-                break
-        service_duration = service_info.get("duration", 60)  # Default to 60 minutes
+        # Get service duration by service_id (spec: internal processing uses service_id)
+        sid = self._get_current_service_id(user_id)
+        service_info = self._get_service_by_id(sid) if sid else {}
+        service_duration = service_info.get("duration", 60)
+        service_name = self._get_service_name_by_id(sid) if sid else ""
 
         # Filter only periods where service fits
         filtered_periods = []
@@ -752,17 +790,12 @@ class ReservationFlow:
                 []
             )
         
-        # Check if service duration can fit in any available slot
-        service_name = self.user_states[user_id]["data"].get("service")
-        if service_name:
-            # Get service duration
-            service_info = {}
-            for service_id, service_data in self.services.items():
-                if service_data.get("name") == service_name:
-                    service_info = service_data
-                    break
-            
-            service_duration = service_info.get("duration", 60)  # Default to 60 minutes
+        # Check if service duration can fit in any available slot (by service_id)
+        sid = self._get_current_service_id(user_id)
+        if sid:
+            service_info = self._get_service_by_id(sid) or {}
+            service_duration = service_info.get("duration", 60)
+            service_name = self._get_service_name_by_id(sid)
             
             # Check if any slot can accommodate the service duration
             can_accommodate = False
@@ -955,8 +988,9 @@ class ReservationFlow:
             else:
                 new_page = min(total_pages - 1, current_page + 1)
             selected_date = self.user_states[user_id].get("time_selection_date", self.user_states[user_id]["data"]["date"])
-            service_name = self.user_states[user_id]["data"].get("service")
-            service_duration = self.user_states[user_id].get("time_selection_service_duration", 60)
+            sid = self._get_current_service_id(user_id)
+            service_name = self._get_service_name_by_id(sid) if sid else ""
+            service_duration = (self._get_service_by_id(sid) or {}).get("duration", 60) if sid else self.user_states[user_id].get("time_selection_service_duration", 60)
             filtered_periods = self.user_states[user_id].get("time_filtered_periods", [])
             period_strings = [f"・{p['time']}~{p['end_time']}" for p in filtered_periods]
             text = f"""{selected_date}ですね！
@@ -978,14 +1012,10 @@ class ReservationFlow:
             available_slots = self._get_available_slots(selected_date, staff_name, user_id)
             available_periods = [slot for slot in available_slots if slot["available"]]
 
-            # Get service duration
-            service_name = self.user_states[user_id]["data"].get("service")
-            service_info = {}
-            for service_id, service_data in self.services.items():
-                if service_data.get("name") == service_name:
-                    service_info = service_data
-                    break
-            service_duration = service_info.get("duration", 60)  # Default to 60 minutes
+            # Get service duration by service_id
+            sid = self._get_current_service_id(user_id)
+            service_info = self._get_service_by_id(sid) if sid else {}
+            service_duration = service_info.get("duration", 60)
 
             # Filter only periods where service fits
             filtered_periods = []
@@ -1045,16 +1075,10 @@ class ReservationFlow:
         if not is_valid_time:
             return time_error_message
 
-        # Calculate end time based on service duration
-        service_name = self.user_states[user_id]["data"]["service"]
-        # Find service by name in the services data
-        service_info = {}
-        for service_id, service_data in self.services.items():
-            if service_data.get("name") == service_name:
-                service_info = service_data
-                break
-        
-        required_duration = service_info.get("duration", 60)  # Default to 60 minutes
+        # Calculate end time based on service duration (service_id)
+        sid = self._get_current_service_id(user_id)
+        service_info = self._get_service_by_id(sid) if sid else {}
+        required_duration = service_info.get("duration", 60)
         
         end_time = self._calculate_optimal_end_time(start_time, required_duration)
 
@@ -1142,15 +1166,11 @@ class ReservationFlow:
 
         print("[Time Validation] User states after storing:", self.user_states[user_id])
 
-        service = self.user_states[user_id]["data"]["service"]
+        sid = self._get_current_service_id(user_id)
+        service_info = self._get_service_by_id(sid) if sid else {}
+        service = self._get_service_name_by_id(sid) if sid else ""
         staff = self.user_states[user_id]["data"]["staff"]
 
-        # Get service info by finding the service ID first
-        service_info = {}
-        for service_id, service_data in self.services.items():
-            if service_data.get("name") == service:
-                service_info = service_data
-                break
         # Check if end time was automatically adjusted
         original_end_time = self.user_states[user_id]["data"].get("original_end_time")
 
@@ -1163,12 +1183,14 @@ class ReservationFlow:
         if original_end_time and original_end_time != end_time:
             adjustment_message = f"\n💡 **終了時間を{service}の所要時間に合わせて{end_time}に調整しました**\n"
         
+        duration_min = service_info.get("duration", 60)
+        price_val = service_info.get("price", 0)
         text = f"""予約内容の確認です：{adjustment_message}
 📅 日時：{selected_date} {start_time}~{end_time}
 💇 サービス：{service}
 👨‍💼 担当者：{staff}
-⏱️ 所要時間：{service_info['duration']}分
-💰 料金：{service_info['price']:,}円
+⏱️ 所要時間：{duration_min}分
+💰 料金：{price_val:,}円
 
 この内容で予約を確定しますか？
 「はい」または「確定」とお送りください。
@@ -1189,6 +1211,13 @@ class ReservationFlow:
             if 'staff' not in reservation_data or not reservation_data.get('staff'):
                 logging.error(f"[_handle_confirmation] ERROR: Staff not found in reservation_data! Data: {reservation_data}")
                 return "申し訳ございませんが、予約処理中にエラーが発生しました。担当者の情報が見つかりませんでした。最初からやり直してください。"
+            
+            # Normalize reservation_data: ensure service_id and service (name) for calendar/sheets
+            sid = reservation_data.get("service_id") or self._get_service_id_by_name(reservation_data.get("service"))
+            if sid:
+                reservation_data["service_id"] = sid
+                reservation_data["service"] = self._get_service_name_by_id(sid)
+            service_info_for_confirm = self._get_service_by_id(sid) if sid else {}
             
             # CRITICAL: Check availability again before confirming to prevent race conditions
             availability_check = self._check_final_availability(reservation_data)
@@ -1228,24 +1257,18 @@ class ReservationFlow:
                 from api.google_sheets_logger import GoogleSheetsLogger
                 sheets_logger = GoogleSheetsLogger()
                 
-                # Prepare reservation data for Google Sheets
-                service_name = reservation_data['service']
-                service_info = {}
-                for service_id, service_data in self.services.items():
-                    if service_data.get("name") == service_name:
-                        service_info = service_data
-                        break
+                # Prepare reservation data for Google Sheets (duration/price from service_id)
                 sheet_reservation_data = {
                     "reservation_id": reservation_id,
-                    "user_id": user_id,  # Add user ID for reminder system
+                    "user_id": user_id,
                     "client_name": client_name,
                     "date": reservation_data['date'],
                     "start_time": reservation_data.get('start_time', reservation_data.get('time', '')),
                     "end_time": reservation_data.get('end_time', ''),
                     "service": reservation_data['service'],
                     "staff": reservation_data['staff'],
-                    "duration": service_info.get('duration', 60),
-                    "price": service_info.get('price', 0)
+                    "duration": service_info_for_confirm.get('duration', 60),
+                    "price": service_info_for_confirm.get('price', 0)
                 }
                 
                 sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
@@ -1353,7 +1376,7 @@ class ReservationFlow:
 📅 日時：{reservation_data['date']} {time_display}
 💇 サービス：{reservation_data['service']}
 👨‍💼 担当者：{reservation_data['staff']}
-💰 料金：{service_info.get('price', 0):,}円
+💰 料金：{service_info_for_confirm.get('price', 0):,}円
 
 当日はお時間までにお越しください。
 ご予約ありがとうございました！"""
@@ -1370,15 +1393,13 @@ class ReservationFlow:
             staff_name = reservation_data['staff']
             user_id = reservation_data.get('user_id', '')
             
-            # If no end_time, calculate it from service duration
+            # If no end_time, calculate it from service duration (service_id)
             if not end_time:
-                service_name = reservation_data['service']
-                service_info = {}
-                for service_id, service_data in self.services.items():
-                    if service_data.get("name") == service_name:
-                        service_info = service_data
-                        break
-                duration = service_info.get('duration', 60)  # Default 60 minutes
+                sid = reservation_data.get('service_id')
+                if not sid and reservation_data.get('service'):
+                    sid = self._get_service_id_by_name(reservation_data['service'])
+                service_info = self._get_service_by_id(sid) if sid else {}
+                duration = service_info.get('duration', 60)
                 start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
                 end_dt = start_dt + timedelta(minutes=duration)
                 end_time = end_dt.strftime("%H:%M")
@@ -2829,12 +2850,9 @@ class ReservationFlow:
             available_services_str = "、".join(available_services)
             return f"申し訳ございませんが、そのサービスは選択できません。\n\n利用可能なサービス：\n{available_services_str}\n\n上記から選択してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
         
-        # Get new service info to calculate new end time
-        new_service_info = {}
-        for service_id, service_data in self.services.items():
-            if service_data.get("name") == new_service:
-                new_service_info = service_data
-                break
+        # Get new service info by service_id for duration
+        new_sid = self._get_service_id_by_name(new_service)
+        new_service_info = self._get_service_by_id(new_sid) if new_sid else None
         
         if not new_service_info:
             return "申し訳ございませんが、サービスの情報を取得できませんでした。\n\n変更をやめる場合は「キャンセル」とお送りください。"
@@ -3057,13 +3075,9 @@ class ReservationFlow:
         try:
             from datetime import datetime, timedelta
             
-            # Get service duration
-            service_name = reservation["service"]
-            service_info = {}
-            for service_id, service_data in self.services.items():
-                if service_data.get("name") == service_name:
-                    service_info = service_data
-                    break
+            # Get service duration by service_id (reservation may have service name from sheets)
+            sid = self._get_service_id_by_name(reservation.get("service")) or reservation.get("service_id")
+            service_info = self._get_service_by_id(sid) if sid else {}
             service_duration = service_info.get("duration", 60)
             
             # Calculate correct end time based on start time + service duration
@@ -3327,7 +3341,10 @@ class ReservationFlow:
         except Exception as e:
             logging.error(f"Failed to send reservation modification notification: {e}")
 
-        # Update local reservation snapshot for confirmation message
+        # Update local reservation snapshot (service_id + name for display)
+        new_sid = self._get_service_id_by_name(new_service)
+        if new_sid:
+            reservation["service_id"] = new_sid
         reservation["service"] = new_service
         reservation["duration"] = new_duration
         reservation["end_time"] = new_end_time

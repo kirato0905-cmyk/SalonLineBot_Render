@@ -185,9 +185,10 @@ class GoogleCalendarHelper:
                 # Fallback to single time (backward compatibility)
                 time_str = reservation_data['time']
                 start_datetime = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                
-                # Get service duration and calculate end time
-                duration_minutes = self._get_service_duration_minutes(service)
+                # Duration by service_id (spec), fallback to service name
+                duration_minutes = self._get_service_duration_minutes(
+                    reservation_data.get("service_id") or reservation_data.get("service")
+                )
                 end_datetime = start_datetime + timedelta(minutes=duration_minutes)
             
             # Calculate duration for display purposes
@@ -312,21 +313,23 @@ class GoogleCalendarHelper:
             traceback.print_exc()
             return False
 
-    def _get_service_duration_minutes(self, service_name: str) -> int:
-        """Return duration in minutes for a given service name."""
-        if not service_name:
+    def _get_service_duration_minutes(self, service_identifier: str) -> int:
+        """Return duration in minutes. service_identifier is service_id (id field) or service name. Spec: use service_id."""
+        if not service_identifier:
             return 60
-
-        # Try direct lookup by service ID key
-        service_data = self.services.get(service_name)
+        ident = str(service_identifier).strip()
+        # 1) Look up by id field (service_id)
+        for _key, data in self.services.items():
+            if isinstance(data, dict) and data.get("id") and str(data.get("id")).lower() == ident.lower():
+                return data.get("duration", 60)
+        # 2) Direct dict key
+        service_data = self.services.get(ident)
         if service_data and isinstance(service_data, dict):
             return service_data.get("duration", 60)
-
-        # Fallback: search by service name field
-        for service_id, data in self.services.items():
-            if isinstance(data, dict) and data.get("name") == service_name:
+        # 3) By name
+        for _key, data in self.services.items():
+            if isinstance(data, dict) and data.get("name") == ident:
                 return data.get("duration", 60)
-
         return 60
 
     def _find_upcoming_event_by_client(self, client_name: str, days_ahead: int = 90) -> Optional[Dict[str, Any]]:

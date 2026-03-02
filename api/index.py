@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Header, HTTPException
 from dotenv import load_dotenv
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage, TemplateMessage, ButtonsTemplate, MessageAction, QuickReply, QuickReplyItem
+from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage, TemplateMessage, ButtonsTemplate, MessageAction, PostbackAction, QuickReply, QuickReplyItem
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, PostbackEvent
 from api.rag_faq import RAGFAQ
 from api.chatgpt_faq import ChatGPTFAQ
@@ -379,10 +379,14 @@ def handle_message(event: MessageEvent):
                 reply = "申し訳ございませんが、現在システムの初期化中です。しばらくお待ちください。"
                 action_type = "system_error"
 
-        # Reply (with optional Quick Reply)
+        # Reply (with optional Quick Reply; support postback for service selection)
         try:
             if quick_reply_items and len(quick_reply_items) <= 13:
-                qr_items = [QuickReplyItem(action=MessageAction(label=item["label"], text=item["text"])) for item in quick_reply_items]
+                def _qr_action(item):
+                    if item.get("type") == "postback" and item.get("data"):
+                        return PostbackAction(label=item["label"], data=item["data"])
+                    return MessageAction(label=item["label"], text=item.get("text", item["label"]))
+                qr_items = [QuickReplyItem(action=_qr_action(item)) for item in quick_reply_items]
                 text_message = TextMessage(text=reply, quick_reply=QuickReply(items=qr_items))
             else:
                 text_message = TextMessage(text=reply)
@@ -516,10 +520,14 @@ def handle_postback(event: PostbackEvent):
         reply_body = reply_text if isinstance(reply_text, str) else str(reply_text)
         quick_reply_items = []
 
-    # Send reply
+    # Send reply (support postback Quick Reply for service menu)
     try:
         if quick_reply_items and len(quick_reply_items) <= 13:
-            qr_items = [QuickReplyItem(action=MessageAction(label=item["label"], text=item["text"])) for item in quick_reply_items]
+            def _qr_action(item):
+                if item.get("type") == "postback" and item.get("data"):
+                    return PostbackAction(label=item["label"], data=item["data"])
+                return MessageAction(label=item["label"], text=item.get("text", item["label"]))
+            qr_items = [QuickReplyItem(action=_qr_action(item)) for item in quick_reply_items]
             text_message = TextMessage(text=reply_body, quick_reply=QuickReply(items=qr_items))
         else:
             text_message = TextMessage(text=reply_body)
