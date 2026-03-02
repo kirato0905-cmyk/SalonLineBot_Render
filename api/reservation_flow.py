@@ -470,30 +470,28 @@ class ReservationFlow:
 下のボタンからメニューをお選びください。
 
 ※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
-        return self._quick_reply_return(text, menu_items)
+        return self._quick_reply_return(text, menu_items, include_cancel=True)
 
-    def _build_service_quick_reply_postback_items(self, include_cancel: bool = True) -> List[Dict[str, str]]:
-        """Build Quick Reply items with postback (action=select_service&service_id=...) for each service. Spec 3-1."""
+    def _build_service_quick_reply_postback_items(self) -> List[Dict[str, str]]:
+        """Build Quick Reply items with postback (action=select_service&service_id=...) for each service. キャンセルは _quick_reply_return(include_cancel=True) で1つだけ追加する."""
         items = []
         for _key, data in self.services.items():
             if isinstance(data, dict) and data.get("id"):
                 sid = data.get("id")
                 name = data.get("name", sid)
                 items.append({"label": name, "type": "postback", "data": f"action=select_service&service_id={sid}"})
-        if include_cancel:
-            items.append({"label": "キャンセル", "text": "キャンセル"})
         return items
 
     def start_reservation_with_service(self, user_id: str, service_identifier: str) -> Union[str, Dict[str, Any]]:
         """Start reservation with service_id from postback only. No name/string matching. Spec 3-2."""
         if not service_identifier or not str(service_identifier).strip():
             text = "メニューを選び直してください。"
-            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items())
+            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items(), include_cancel=True)
         service_id = str(service_identifier).strip()
         svc = self._get_service_by_id(service_id)
         if not svc:
             text = "メニューを選び直してください。"
-            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items())
+            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items(), include_cancel=True)
         self.user_states[user_id] = {
             "step": "service_selection",
             "data": {"user_id": user_id, "service_id": service_id}
@@ -644,11 +642,10 @@ class ReservationFlow:
         matches = self._fallback_match_service_by_text(normalized_input)
         if not matches:
             text = "メニューを選択してください。"
-            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items())
+            return self._quick_reply_return(text, self._build_service_quick_reply_postback_items(), include_cancel=True)
         if len(matches) > 1:
             items = [{"label": m[1].get("name", m[0]), "type": "postback", "data": f"action=select_service&service_id={m[0]}"} for m in matches]
-            items.append({"label": "キャンセル", "text": "キャンセル"})
-            return self._quick_reply_return("複数該当しました。どちらにしますか？", items)
+            return self._quick_reply_return("複数該当しました。どちらにしますか？", items, include_cancel=True)
         service_id, _ = matches[0]
         self.user_states[user_id]["data"]["service_id"] = service_id
         return self._reply_after_service_selected(user_id)
