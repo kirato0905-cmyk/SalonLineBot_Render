@@ -35,31 +35,66 @@
       "price": 10000,
       "description": "カットとカラーのセットメニュー"
     }
+    "service_6": {
+      "id": "cut_color_treatment",
+      "name": "カット＋カラー＋トリートメント",
+      "duration": 180,
+      "price": 14000,
+      "description": "カット・カラー・トリートメントのセットメニュー"
+    },
+    "service_7": {
+      "id": "cut_treatment",
+      "name": "カット＋トリートメント",
+      "duration": 120,
+      "price": 9000,
+      "description": "カットとトリートメントのセットメニュー"
+    },
+    "service_8": {
+      "id": "color_treatment",
+      "name": "カラー＋トリートメント",
+      "duration": 120,
+      "price": 10000,
+      "description": "カラーとトリートメントのセットメニュー"
+    },
+    "service_9": {
+      "id": "bleach_color",
+      "name": "ブリーチ＋カラー",
+      "duration": 210,
+      "price": 16000,
+      "description": "ブリーチ1回＋カラーのセットメニュー"
+    },
+    "service_10": {
+      "id": "double_color",
+      "name": "ダブルカラー",
+      "duration": 210,
+      "price": 17000,
+      "description": "ブリーチ2回＋カラーのダブルカラーメニュー"
+    }
   },
    "staff": {
     "staff_1": {
       "name": "山田",
       "specialty": "カット・カラー",
       "experience": "5年",
-      "email_env": "goldentime0719@gmail.com",
+      "email_env": "kirato0905@icloud.com",
       "color_id": "1",
-      "calendar_id": "goldentime0719@gmail.com"
+      "calendar_id": "8a1c814ebc08c69ded56064a98e0407c895ed5af0394946ce58c5139dce4be3b@group.calendar.google.com"
     },
     "staff_2": {
       "name": "佐藤",
       "specialty": "カラー・パーマ",
       "experience": "3年",
-      "email_env": "keepconfidentalw@gmail.com",
+      "email_env": "kirato0905@icloud.com",
       "color_id": "1",
-      "calendar_id": "keepconfidentalw@gmail.com"
+      "calendar_id": "62e2e039668e3997d19038833582d81a71c7b787cc34dc853eb8c22a2e4ed7b5@group.calendar.google.com"
     },
     "staff_3": {
       "name": "鈴木",
       "specialty": "カット・パーマ",
       "experience": "7年",
-      "email_env": "goldenchain0804@gmail.com",
+      "email_env": "kirato0905@icloud.com",
       "color_id": "1",
-      "calendar_id": "goldenchain0804@gmail.com"
+      "calendar_id": "1658be0b1d3b4707b5488522d51f533ad47ec794977181ef1050a629c2cf1da6@group.calendar.google.com"
     }
   }
 }
