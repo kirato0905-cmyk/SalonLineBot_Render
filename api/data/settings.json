@@ -1,8 +1,8 @@
 {
   "timezone": "Asia/Tokyo",
   "business_hours": {
-    "mon": [{"start": "10:00", "end": "13:00"}, {"start": "14:00", "end": "20:00"}],
-    "tue": [],
+    "mon": [],
+    "tue": [{"start": "10:00", "end": "13:00"}, {"start": "14:00", "end": "20:00"}],
     "wed": [{"start": "10:00", "end": "13:00"}, {"start": "14:00", "end": "20:00"}],
     "thu": [{"start": "10:00", "end": "13:00"}, {"start": "14:00", "end": "20:00"}],
     "fri": [{"start": "10:00", "end": "13:00"}, {"start": "14:00", "end": "20:00"}],
@@ -10,13 +10,13 @@
     "sun": []
   },
   "monthly_closed": [
-    { "weekday": "wed", "weeks": [2, 3] }
+    { "weekday": "wed", "weeks": [2] }
   ],
   "closed_dates": [
-    "2026-02-11"
+    "2026-04-24"
   ],
   "special_hours": [
-    { "date": "2026-02-23", "hours": [{"start": "12:00", "end": "18:00"}] }
+    { "date": "2026-04-23", "hours": [{"start": "12:00", "end": "18:00"}] }
   ],
   "booking_rules": {
     "slot_minutes": 30
