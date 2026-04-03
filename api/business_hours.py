@@ -51,6 +51,7 @@ def _default_settings() -> Dict[str, Any]:
         "closed_dates": [],
         "special_hours": [],
         "booking_rules": {"slot_minutes": 30},
+        "reservation_ui_limit_days": 45,
     }
 
 
@@ -60,6 +61,14 @@ def get_timezone() -> str:
 
 def get_slot_minutes() -> int:
     return int(load_settings().get("booking_rules", {}).get("slot_minutes", 30))
+
+
+def get_reservation_ui_limit_days() -> int:
+    """Quick Reply で提示する日付の上限（本日から何日先まで）。手入力の上限とは別。"""
+    try:
+        return int(load_settings().get("reservation_ui_limit_days", 45))
+    except (TypeError, ValueError):
+        return 45
 
 
 def _parse_date(d: str) -> date:

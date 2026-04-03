@@ -5,10 +5,10 @@ import re
 import os
 import json
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
 from api.google_calendar import GoogleCalendarHelper
-from api.business_hours import get_slot_minutes, is_open_date, get_max_end_time_for_date
+from api.business_hours import get_slot_minutes, is_open_date, get_max_end_time_for_date, get_reservation_ui_limit_days
 
 class ReservationFlow:
     def __init__(self):
@@ -325,24 +325,371 @@ class ReservationFlow:
         
         return date_slots
     
-    def _create_calendar_template(self, staff_name: str = None) -> str:
-        """Create Google Calendar URL for date selection (per staff)"""
-        # Use staff-specific calendar URL if staff_name is provided
-        
-        # Fallback to default calendar (should not happen in normal flow)
-        calendar_url = self.google_calendar.get_calendar_url(staff_name)
+    @staticmethod
+    def _calendar_week_monday(d: date) -> date:
+        """月曜始まりのカレンダー週の月曜日（datetime.weekday(): 月=0）。"""
+        return d - timedelta(days=d.weekday())
 
-        calendar_message = "📅 **ご希望の日付をお選びください**\n\n"
-        calendar_message += "🗓️ **Googleカレンダーで空き状況を確認してください：**\n"
-        calendar_message += f"🔗 {calendar_url}\n\n"
-        calendar_message += "💡 **手順：**\n"
-        calendar_message += "1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く\n"
-        calendar_message += "2️⃣ 空いている日付を確認\n"
-        calendar_message += "3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信\n"
-        calendar_message += "📝 例：`2025-01-15`\n\n"
-        calendar_message += "❌ 予約をキャンセルする場合は「キャンセル」と送信"
+    @staticmethod
+    def _date_quick_reply_label(date_str: str) -> str:
+        d = datetime.strptime(date_str, "%Y-%m-%d").date()
+        wk = ["月", "火", "水", "木", "金", "土", "日"][d.weekday()]
+        return f"{d.month}/{d.day}({wk})"
 
-        return calendar_message
+    def _periods_fittable_for_service(
+        self, available_periods: List[Dict[str, Any]], service_duration: int
+    ) -> List[Dict[str, Any]]:
+        filtered = []
+        for period in available_periods:
+            slot_duration = self._calculate_time_duration_minutes(period["time"], period["end_time"])
+            if slot_duration >= service_duration:
+                filtered.append(period)
+        return filtered
+
+    def _date_has_fittable_slot_new_booking(
+        self, user_id: str, date_str: str, staff_name: Optional[str], service_duration: int
+    ) -> bool:
+        try:
+            slots = self._get_available_slots(date_str, staff_name, user_id)
+            available_periods = [slot for slot in slots if slot.get("available")]
+            return bool(self._periods_fittable_for_service(available_periods, service_duration))
+        except Exception as e:
+            logging.error(f"[date UI] slot check failed for new booking {date_str}: {e}")
+            return False
+
+    def _date_has_fittable_slot_modify_time(
+        self, date_str: str, staff_name: str, service_duration: int, exclude_reservation_id: str
+    ) -> bool:
+        try:
+            slots = self.google_calendar.get_available_slots_for_modification(
+                date_str, exclude_reservation_id, staff_name
+            )
+            available_periods = [slot for slot in slots if slot.get("available")]
+            return bool(self._periods_fittable_for_service(available_periods, service_duration))
+        except Exception as e:
+            logging.error(f"[date UI] slot check failed for modify {date_str}: {e}")
+            return False
+
+    def _collect_bookable_dates_in_calendar_week(
+        self,
+        user_id: str,
+        week_start: date,
+        today: date,
+        last_ui: date,
+        *,
+        context: str,
+    ) -> List[str]:
+        dates_out: List[str] = []
+        for i in range(7):
+            d = week_start + timedelta(days=i)
+            if d < today or d > last_ui:
+                continue
+            if not is_open_date(d):
+                continue
+            ds = d.strftime("%Y-%m-%d")
+            if context == "new_reservation":
+                staff_name = self.user_states[user_id]["data"].get("staff")
+                sid = self._get_current_service_id(user_id)
+                svc = self._get_service_by_id(sid) if sid else {}
+                duration = int(svc.get("duration", 60))
+                if self._date_has_fittable_slot_new_booking(user_id, ds, staff_name, duration):
+                    dates_out.append(ds)
+            elif context == "modify_time":
+                res = self.user_states[user_id].get("reservation_data") or {}
+                staff_name = res.get("staff")
+                sid = self._get_service_id_by_name(res.get("service", ""))
+                svc = self._get_service_by_id(sid) if sid else {}
+                duration = int(svc.get("duration", 60))
+                ex_id = res.get("reservation_id") or ""
+                if staff_name and ex_id and self._date_has_fittable_slot_modify_time(
+                    ds, staff_name, duration, ex_id
+                ):
+                    dates_out.append(ds)
+        return dates_out
+
+    def _build_date_week_selection_message(
+        self,
+        user_id: str,
+        *,
+        context: str,
+        error_prefix: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        today = datetime.now().date()
+        limit_days = get_reservation_ui_limit_days()
+        last_ui = today + timedelta(days=limit_days)
+        min_ws = self._calendar_week_monday(today)
+
+        raw_ws = self.user_states[user_id].get("date_selection_week_start")
+        if not raw_ws:
+            ws = min_ws
+            self.user_states[user_id]["date_selection_week_start"] = ws.strftime("%Y-%m-%d")
+        else:
+            try:
+                ws = datetime.strptime(raw_ws, "%Y-%m-%d").date()
+            except ValueError:
+                ws = min_ws
+                self.user_states[user_id]["date_selection_week_start"] = ws.strftime("%Y-%m-%d")
+            if ws < min_ws:
+                ws = min_ws
+                self.user_states[user_id]["date_selection_week_start"] = ws.strftime("%Y-%m-%d")
+
+        bookable = self._collect_bookable_dates_in_calendar_week(
+            user_id, ws, today, last_ui, context=context
+        )
+
+        show_prev = ws > min_ws
+        show_next = (ws + timedelta(days=7)) <= last_ui
+
+        items: List[Dict[str, str]] = []
+        if show_prev:
+            items.append({"label": "前の週", "text": "前の週"})
+        for ds in bookable:
+            items.append({"label": self._date_quick_reply_label(ds), "text": ds})
+        if show_next:
+            items.append({"label": "次の週", "text": "次の週"})
+
+        if context == "new_reservation":
+            staff_name = self.user_states[user_id]["data"].get("staff")
+            calendar_url = (
+                self._get_staff_calendar_url(staff_name)
+                if staff_name
+                else self.google_calendar.get_calendar_url()
+            )
+            header = "📅 **ご希望の日付をお選びください**\n\n"
+            header += f"下のボタンから日付をタップできます（本日から{limit_days}日以内・空きのある営業日のみ表示）。\n"
+            header += f"{limit_days}日より先の日付は「YYYY-MM-DD」形式で手入力も可能です。\n\n"
+            header += f"🗓️ 空きの詳細確認（Googleカレンダー）：\n🔗 {calendar_url}\n\n"
+            trail = "❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"
+        else:
+            res = self.user_states[user_id].get("reservation_data") or {}
+            staff_name = res.get("staff")
+            calendar_url = (
+                self._get_staff_calendar_url(staff_name)
+                if staff_name
+                else self.google_calendar.get_calendar_url()
+            )
+            header = "📅 **新しい日付をお選びください**\n\n"
+            header += f"下のボタンから日付をタップできます（本日から{limit_days}日以内・空きのある営業日のみ表示）。\n"
+            header += "それ以外の日付は「YYYY-MM-DD」形式で手入力も可能です。\n\n"
+            header += f"🗓️ 空きの詳細確認：\n🔗 {calendar_url}\n\n"
+            trail = "変更をやめる場合は「キャンセル」とお送りください。"
+
+        body_note = ""
+        if not bookable:
+            body_note = (
+                "\n⚠️ この週に表示できる日付がありません。「次の週」でお進みいただくか、"
+                "日付を手入力してください。\n"
+            )
+
+        text = (f"{error_prefix}\n\n" if error_prefix else "") + header + body_note + trail
+        return self._quick_reply_return(text, items)
+
+    def _apply_selected_date_go_to_time_selection(
+        self, user_id: str, selected_date: str
+    ) -> Union[str, Dict[str, Any]]:
+        """日付確定後、時間選択へ。空き・サービス長の検証を含む。"""
+        self.user_states[user_id]["data"]["date"] = selected_date
+        self.user_states[user_id]["step"] = "time_selection"
+
+        staff_name = self.user_states[user_id]["data"].get("staff")
+        available_slots = self._get_available_slots(selected_date, staff_name, user_id)
+        available_periods = [slot for slot in available_slots if slot["available"]]
+
+        sid = self._get_current_service_id(user_id)
+        service_info = self._get_service_by_id(sid) if sid else {}
+        service_duration = service_info.get("duration", 60)
+        service_name = self._get_service_name_by_id(sid) if sid else ""
+
+        filtered_periods = self._periods_fittable_for_service(available_periods, service_duration)
+
+        if not filtered_periods:
+            self.user_states[user_id]["step"] = "date_selection"
+            err = f"""申し訳ございませんが、{selected_date}は{service_name}（{service_duration}分）の予約可能な時間がありません。
+
+他の日付をお選びください。"""
+            return self._build_date_week_selection_message(
+                user_id,
+                context="new_reservation",
+                error_prefix=err,
+            )
+
+        sid = self._get_current_service_id(user_id)
+        if sid:
+            service_info = self._get_service_by_id(sid) or {}
+            service_duration = service_info.get("duration", 60)
+            service_name = self._get_service_name_by_id(sid)
+
+            can_accommodate = False
+            max_slot_duration = 0
+
+            for period in available_periods:
+                slot_duration = self._calculate_time_duration_minutes(
+                    period["time"],
+                    period["end_time"],
+                )
+                max_slot_duration = max(max_slot_duration, slot_duration)
+
+                if slot_duration >= service_duration:
+                    can_accommodate = True
+                    break
+
+            if not can_accommodate:
+                self.user_states[user_id]["step"] = "date_selection"
+
+                service_hours = service_duration // 60
+                service_minutes = service_duration % 60
+                if service_hours > 0 and service_minutes > 0:
+                    duration_str = f"{service_hours}時間{service_minutes}分"
+                elif service_hours > 0:
+                    duration_str = f"{service_hours}時間"
+                else:
+                    duration_str = f"{service_minutes}分"
+
+                max_hours = max_slot_duration // 60
+                max_minutes = max_slot_duration % 60
+                if max_hours > 0 and max_minutes > 0:
+                    max_duration_str = f"{max_hours}時間{max_minutes}分"
+                elif max_hours > 0:
+                    max_duration_str = f"{max_hours}時間"
+                else:
+                    max_duration_str = f"{max_minutes}分"
+
+                err = f"""申し訳ございませんが、{selected_date}の予約可能な時間帯では、{service_name}（{duration_str}）の予約ができません。
+
+📅 選択した日付：{selected_date}
+💇 選択したサービス：{service_name}（{duration_str}）
+⏱️ この日の最大空き時間：{max_duration_str}
+
+この日付では{service_name}の予約時間が確保できません。
+
+他の日付をお選びください。"""
+                return self._build_date_week_selection_message(
+                    user_id,
+                    context="new_reservation",
+                    error_prefix=err,
+                )
+
+        time_options = self._build_time_options_30min(filtered_periods, service_duration)
+        self.user_states[user_id]["time_options"] = time_options
+        self.user_states[user_id]["time_slot_page"] = 0
+        self.user_states[user_id]["time_selection_date"] = selected_date
+        self.user_states[user_id]["time_selection_service_duration"] = service_duration
+        self.user_states[user_id]["time_filtered_periods"] = filtered_periods
+
+        is_modification = self.user_states[user_id].get("is_modification", False)
+        original_reservation = (
+            self.user_states[user_id].get("original_reservation") if is_modification else None
+        )
+
+        period_strings = []
+        for period in filtered_periods:
+            start_time = period["time"]
+            end_time = period["end_time"]
+            if is_modification and original_reservation:
+                if start_time == original_reservation.get("start_time") and end_time == original_reservation.get(
+                    "end_time"
+                ):
+                    period_strings.append(f"・{start_time}~{end_time} ⭐（現在の予約時間）")
+                else:
+                    period_strings.append(f"・{start_time}~{end_time}")
+            else:
+                period_strings.append(f"・{start_time}~{end_time}")
+
+        modification_note = ""
+        if is_modification and original_reservation:
+            modification_note = (
+                f"\n\n💡 現在の予約時間（{original_reservation.get('start_time')}~"
+                f"{original_reservation.get('end_time')}）も選択できます。"
+            )
+
+        text = f"""{selected_date}ですね！
+{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです：
+
+{chr(10).join(period_strings)}{modification_note}
+
+ご希望の開始時間をお送りください。
+例）10:00 または 10:30
+
+❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
+        return self._build_time_selection_quick_reply(user_id, text, page=0)
+
+    def _handle_modify_week_date_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        """予約変更（日時変更）の週ページング日付UI。"""
+        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
+        message_normalized = message.strip()
+        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+            if user_id in self.user_states:
+                del self.user_states[user_id]
+            return "予約変更をキャンセルいたします。またのご利用をお待ちしております。"
+
+        today = datetime.now().date()
+        min_ws = self._calendar_week_monday(today)
+
+        if message_normalized == "前の週":
+            st = self.user_states[user_id]
+            raw = st.get("date_selection_week_start", min_ws.strftime("%Y-%m-%d"))
+            try:
+                ws = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                ws = min_ws
+            new_ws = max(min_ws, ws - timedelta(days=7))
+            st["date_selection_week_start"] = new_ws.strftime("%Y-%m-%d")
+            return self._build_date_week_selection_message(user_id, context="modify_time")
+
+        if message_normalized == "次の週":
+            st = self.user_states[user_id]
+            raw = st.get("date_selection_week_start", min_ws.strftime("%Y-%m-%d"))
+            try:
+                ws = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                ws = min_ws
+            new_ws = ws + timedelta(days=7)
+            st["date_selection_week_start"] = new_ws.strftime("%Y-%m-%d")
+            return self._build_date_week_selection_message(user_id, context="modify_time")
+
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", message)
+        selected_date = None
+        if date_match:
+            selected_date = date_match.group(1)
+            try:
+                datetime.strptime(selected_date, "%Y-%m-%d")
+            except ValueError:
+                selected_date = None
+
+        if not selected_date:
+            err = (
+                "申し訳ございませんが、日付の形式が正しくありません。\n"
+                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。\n"
+                "例）2026-01-15"
+            )
+            return self._build_date_week_selection_message(
+                user_id, context="modify_time", error_prefix=err
+            )
+
+        try:
+            date_obj = datetime.strptime(selected_date, "%Y-%m-%d").date()
+        except ValueError:
+            err = (
+                "申し訳ございませんが、日付の形式が正しくありません。\n"
+                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。"
+            )
+            return self._build_date_week_selection_message(
+                user_id, context="modify_time", error_prefix=err
+            )
+
+        if date_obj < today:
+            err = "過去の日付は選択できません。\n本日以降の日付を入力してください。"
+            return self._build_date_week_selection_message(
+                user_id, context="modify_time", error_prefix=err
+            )
+
+        if not is_open_date(date_obj):
+            err = f"申し訳ございませんが、{selected_date}は休業日です。\n別の日付をお選びください。"
+            return self._build_date_week_selection_message(
+                user_id, context="modify_time", error_prefix=err
+            )
+
+        return self._show_available_times_for_date(user_id, selected_date)
         
     def detect_intent(self, message: str, user_id: str = None) -> str:
         """Detect user intent from message with context awareness"""
@@ -364,7 +711,7 @@ class ReservationFlow:
             if step in ["service_selection", 'staff_selection', "date_selection", "time_selection", "confirmation"]:
                 return "reservation_flow"
             # If user is in cancel or modify flow, continue the flow regardless of message type
-            if step in ["cancel_select_reservation", "cancel_confirm", "modify_select_reservation", "modify_select_field", "modify_time_date_select", "modify_time_input_date", "modify_time_select", "modify_confirm", "modify_staff_select", "modify_service_select", "modify_re_reservation_confirm"]:
+            if step in ["cancel_select_reservation", "cancel_confirm", "modify_select_reservation", "modify_select_field", "modify_time_date_select", "modify_time_input_date", "modify_time_week_select", "modify_time_select", "modify_confirm", "modify_staff_select", "modify_service_select", "modify_re_reservation_confirm"]:
                 intent = step.split("_")[0]  # Return "cancel" or "modify"
                 print(f"Intent detection - User: {user_id}, Step: {step}, Intent: {intent}")
                 return intent
@@ -538,43 +885,31 @@ class ReservationFlow:
         if preselected_staff:
             self.user_states[user_id]["data"]["staff"] = preselected_staff
             self.user_states[user_id]["step"] = "date_selection"
-            staff_calendar_url = self._get_staff_calendar_url(preselected_staff)
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
-            text = f"""{service_name}ですね！
+            intro = f"""{service_name}ですね！
 担当は{staff_display}で承ります。
 
-ご希望の日付をお選びください。
-📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {staff_calendar_url}
-
-💡 **手順：**
-1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
-2️⃣ 空いている日付を確認
-3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
-📝 例：`2025-01-15`
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
-            return self._quick_reply_return(text, [])
+"""
+            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                datetime.now().date()
+            ).strftime("%Y-%m-%d")
+            reply = self._build_date_week_selection_message(user_id, context="new_reservation")
+            reply["text"] = intro + reply["text"]
+            return reply
         if self._has_single_staff():
             single_staff_name = self._get_single_staff_name()
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
-            staff_calendar_url = self._get_staff_calendar_url(single_staff_name)
-            text = f"""{service_name}ですね！
+            intro = f"""{service_name}ですね！
 担当は{single_staff_name}さんで承ります。
 
-ご希望の日付をお選びください。
-📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {staff_calendar_url}
-
-💡 **手順：**
-1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
-2️⃣ 空いている日付を確認
-3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
-📝 例：`2025-01-15`
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
-            return self._quick_reply_return(text, [])
+"""
+            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                datetime.now().date()
+            ).strftime("%Y-%m-%d")
+            reply = self._build_date_week_selection_message(user_id, context="new_reservation")
+            reply["text"] = intro + reply["text"]
+            return reply
         self.user_states[user_id]["step"] = "staff_selection"
         staff_list = []
         staff_items = []
@@ -683,222 +1018,98 @@ class ReservationFlow:
         
         self.user_states[user_id]["data"]["staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
-        staff_calendar_url = self._get_staff_calendar_url(selected_staff)
         staff_display = f"{selected_staff}さん" if selected_staff != "未指定" else selected_staff
-        text = f"""担当者：{staff_display}を選択しました。
+        intro = f"""担当者：{staff_display}を選択しました。
 
-ご希望の日付をお選びください。
-📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {staff_calendar_url}
-
-💡 **手順：**
-1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
-2️⃣ 空いている日付を確認
-3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
-📝 例：`2025-01-15`
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
-        return self._quick_reply_return(text, [])
+"""
+        self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+            datetime.now().date()
+        ).strftime("%Y-%m-%d")
+        reply = self._build_date_week_selection_message(user_id, context="new_reservation")
+        reply["text"] = intro + reply["text"]
+        return reply
     
-    def _handle_date_selection(self, user_id: str, message: str) -> str:
-        """Handle date selection from calendar template"""
-        # Check for flow cancellation first
+    def _handle_date_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        """日付選択：週単位クイックリプライ＋手入力（UI上限日数はクイックリプライのみ）。"""
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
-        
-        # Check for navigation to service selection
+
         service_change_keywords = self.navigation_keywords.get("service_change", [])
         if any(keyword in message_normalized for keyword in service_change_keywords):
             self.user_states[user_id]["step"] = "service_selection"
             return self._start_reservation(user_id)
-        
-        # Parse date from user input - only accept YYYY-MM-DD format
+
+        today = datetime.now().date()
+        min_ws = self._calendar_week_monday(today)
+
+        if message_normalized == "前の週":
+            st = self.user_states[user_id]
+            raw = st.get("date_selection_week_start", min_ws.strftime("%Y-%m-%d"))
+            try:
+                ws = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                ws = min_ws
+            new_ws = max(min_ws, ws - timedelta(days=7))
+            st["date_selection_week_start"] = new_ws.strftime("%Y-%m-%d")
+            return self._build_date_week_selection_message(user_id, context="new_reservation")
+
+        if message_normalized == "次の週":
+            st = self.user_states[user_id]
+            raw = st.get("date_selection_week_start", min_ws.strftime("%Y-%m-%d"))
+            try:
+                ws = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                ws = min_ws
+            new_ws = ws + timedelta(days=7)
+            st["date_selection_week_start"] = new_ws.strftime("%Y-%m-%d")
+            return self._build_date_week_selection_message(user_id, context="new_reservation")
+
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", message)
         selected_date = None
-        
-        # Try to parse YYYY-MM-DD format
-        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', message)
         if date_match:
             selected_date = date_match.group(1)
-            # Validate the date format
             try:
                 datetime.strptime(selected_date, "%Y-%m-%d")
             except ValueError:
                 selected_date = None
-        
+
         if not selected_date:
-            return self._quick_reply_return("申し訳ございませんが、日付の形式が正しくありません。\n「YYYY-MM-DD」の形式で入力してください。\n例）2025-01-15", [])
+            err = (
+                "申し訳ございませんが、日付の形式が正しくありません。\n"
+                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。\n"
+                "例）2026-01-15"
+            )
+            return self._build_date_week_selection_message(
+                user_id, context="new_reservation", error_prefix=err
+            )
 
         try:
             date_obj = datetime.strptime(selected_date, "%Y-%m-%d").date()
         except ValueError:
-            return self._quick_reply_return("申し訳ございませんが、日付の形式が正しくありません。\n「YYYY-MM-DD」の形式で入力してください。\n例）2025-01-15", [])
-        if date_obj < datetime.now().date():
-            return self._quick_reply_return("過去の日付は選択できません。\n本日以降の日付を入力してください。\n\n❌ 予約をキャンセルする場合は「キャンセル」と送信", [])
-        if not is_open_date(date_obj):
-            return self._quick_reply_return(f"申し訳ございませんが、{selected_date}は休業日です。\n別の日付をお選びください。\n\n❌ 予約をキャンセルする場合は「キャンセル」と送信", [])
-
-        self.user_states[user_id]["data"]["date"] = selected_date
-        self.user_states[user_id]["step"] = "time_selection"
-        
-        # Get available time periods for selected date from Google Calendar
-        staff_name = self.user_states[user_id]["data"].get("staff")
-        available_slots = self._get_available_slots(selected_date, staff_name, user_id)
-        available_periods = [slot for slot in available_slots if slot["available"]]
-
-        # Get service duration by service_id (spec: internal processing uses service_id)
-        sid = self._get_current_service_id(user_id)
-        service_info = self._get_service_by_id(sid) if sid else {}
-        service_duration = service_info.get("duration", 60)
-        service_name = self._get_service_name_by_id(sid) if sid else ""
-
-        # Filter only periods where service fits
-        filtered_periods = []
-        for period in available_periods:
-            slot_duration = self._calculate_time_duration_minutes(period["time"], period["end_time"])
-            if slot_duration >= service_duration:
-                filtered_periods.append(period)
-        
-        if not filtered_periods:
-            # No available slots for selected date - return to date selection
-            self.user_states[user_id]["step"] = "date_selection"
-            # ...existing "no available slot" message...
-            # Get staff name for calendar URL
-            staff_name = self.user_states[user_id]["data"].get("staff")
-            staff_calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
-            
-            return self._quick_reply_return(
-                f"""申し訳ございませんが、{selected_date}は{service_name}（{service_duration}分）の予約可能な時間がありません。
-
-他の日付をお選びください。
-
-📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {staff_calendar_url}
-
-💡 **手順：**
-1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
-2️⃣ 空いている日付を確認
-3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
-📝 例：`2025-01-15`
-
-❌ 予約をキャンセルする場合は「キャンセル」と送信""",
-                []
+            err = (
+                "申し訳ございませんが、日付の形式が正しくありません。\n"
+                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。"
             )
-        
-        # Check if service duration can fit in any available slot (by service_id)
-        sid = self._get_current_service_id(user_id)
-        if sid:
-            service_info = self._get_service_by_id(sid) or {}
-            service_duration = service_info.get("duration", 60)
-            service_name = self._get_service_name_by_id(sid)
-            
-            # Check if any slot can accommodate the service duration
-            can_accommodate = False
-            max_slot_duration = 0
-            
-            for period in available_periods:
-                slot_duration = self._calculate_time_duration_minutes(
-                    period["time"], 
-                    period["end_time"]
-                )
-                max_slot_duration = max(max_slot_duration, slot_duration)
-                
-                if slot_duration >= service_duration:
-                    can_accommodate = True
-                    break
-            
-            if not can_accommodate:
-                # Service duration is greater than all available slots
-                self.user_states[user_id]["step"] = "date_selection"
-                staff_name = self.user_states[user_id]["data"].get("staff")
-                staff_calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
-                
-                # Convert duration to readable format
-                service_hours = service_duration // 60
-                service_minutes = service_duration % 60
-                if service_hours > 0 and service_minutes > 0:
-                    duration_str = f"{service_hours}時間{service_minutes}分"
-                elif service_hours > 0:
-                    duration_str = f"{service_hours}時間"
-                else:
-                    duration_str = f"{service_minutes}分"
-                
-                max_hours = max_slot_duration // 60
-                max_minutes = max_slot_duration % 60
-                if max_hours > 0 and max_minutes > 0:
-                    max_duration_str = f"{max_hours}時間{max_minutes}分"
-                elif max_hours > 0:
-                    max_duration_str = f"{max_hours}時間"
-                else:
-                    max_duration_str = f"{max_minutes}分"
-                
-                return self._quick_reply_return(
-                    f"""申し訳ございませんが、{selected_date}の予約可能な時間帯では、{service_name}（{duration_str}）の予約ができません。
+            return self._build_date_week_selection_message(
+                user_id, context="new_reservation", error_prefix=err
+            )
 
-📅 選択した日付：{selected_date}
-💇 選択したサービス：{service_name}（{duration_str}）
-⏱️ この日の最大空き時間：{max_duration_str}
+        if date_obj < today:
+            err = "過去の日付は選択できません。\n本日以降の日付を入力してください。"
+            return self._build_date_week_selection_message(
+                user_id, context="new_reservation", error_prefix=err
+            )
 
-この日付では{service_name}の予約時間が確保できません。
+        if not is_open_date(date_obj):
+            err = f"申し訳ございませんが、{selected_date}は休業日です。\n別の日付をお選びください。"
+            return self._build_date_week_selection_message(
+                user_id, context="new_reservation", error_prefix=err
+            )
 
-他の日付をお選びください。
-
-📅 **Googleカレンダーで空き状況を確認してください：**
-🔗 {staff_calendar_url}
-
-💡 **手順：**
-1️⃣ 上記リンクをクリックしてGoogleカレンダーを開く
-2️⃣ 空いている日付を確認
-3️⃣ 希望の日付を「YYYY-MM-DD」形式で送信
-📝 例：`2025-01-15`
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください""",
-                    []
-                )
-        
-        # Store time options for Quick Reply paging (30-min slots, max 8 per page)
-        time_options = self._build_time_options_30min(filtered_periods, service_duration)
-        self.user_states[user_id]["time_options"] = time_options
-        self.user_states[user_id]["time_slot_page"] = 0
-        self.user_states[user_id]["time_selection_date"] = selected_date
-        self.user_states[user_id]["time_selection_service_duration"] = service_duration
-        self.user_states[user_id]["time_filtered_periods"] = filtered_periods
-        
-        # Check if this is a modification flow
-        is_modification = self.user_states[user_id].get("is_modification", False)
-        original_reservation = self.user_states[user_id].get("original_reservation") if is_modification else None
-        
-        # Format available periods for display
-        period_strings = []
-        for period in filtered_periods:
-            start_time = period["time"]
-            end_time = period["end_time"]
-            # Highlight original reservation time in modification flow
-            if is_modification and original_reservation:
-                if (start_time == original_reservation.get("start_time") and 
-                    end_time == original_reservation.get("end_time")):
-                    period_strings.append(f"・{start_time}~{end_time} ⭐（現在の予約時間）")
-                else:
-                    period_strings.append(f"・{start_time}~{end_time}")
-            else:
-                period_strings.append(f"・{start_time}~{end_time}")
-        
-        modification_note = ""
-        if is_modification and original_reservation:
-            modification_note = f"\n\n💡 現在の予約時間（{original_reservation.get('start_time')}~{original_reservation.get('end_time')}）も選択できます。"
-        
-        text = f"""{selected_date}ですね！
-{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです：
-
-{chr(10).join(period_strings)}{modification_note}
-
-ご希望の開始時間をお送りください。
-例）10:00 または 10:30
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
-        return self._build_time_selection_quick_reply(user_id, text, page=0)
+        return self._apply_selected_date_go_to_time_selection(user_id, selected_date)
     
     def _check_advance_booking_time(self, date_str: str, start_time: str) -> tuple:
         """
@@ -971,8 +1182,10 @@ class ReservationFlow:
         date_change_keywords = self.navigation_keywords.get("date_change", [])
         if any(keyword in message_normalized for keyword in date_change_keywords):
             self.user_states[user_id]["step"] = "date_selection"
-            staff_name_for_calendar = self.user_states[user_id]["data"].get("staff")
-            return self._quick_reply_return(self._create_calendar_template(staff_name_for_calendar), [])
+            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                datetime.now().date()
+            ).strftime("%Y-%m-%d")
+            return self._build_date_week_selection_message(user_id, context="new_reservation")
         
         # Quick Reply paging: 前へ / 次へ (re-display same time selection with different page)
         if message_normalized in ("前へ", "次へ"):
@@ -2050,7 +2263,7 @@ class ReservationFlow:
             return "予約変更をキャンセルいたします。またのご利用をお待ちしております。"
         
         # Step 1: Start modification flow - show user's reservations
-        if not state or state.get("step") not in ["modify_select_reservation", "modify_select_field", "modify_time_date_select", "modify_time_input_date", "modify_time_select", "modify_confirm", "modify_staff_select", "modify_service_select", "modify_re_reservation_confirm"]:
+        if not state or state.get("step") not in ["modify_select_reservation", "modify_select_field", "modify_time_date_select", "modify_time_input_date", "modify_time_week_select", "modify_time_select", "modify_confirm", "modify_staff_select", "modify_service_select", "modify_re_reservation_confirm"]:
             self.user_states[user_id] = {"step": "modify_select_reservation"}
             return self._show_user_reservations_for_modification(user_id)
         
@@ -2070,6 +2283,9 @@ class ReservationFlow:
         # Step 5: Handle time modification new date input
         elif state.get("step") == "modify_time_input_date":
             return self._handle_time_input_date(user_id, message)
+
+        elif state.get("step") == "modify_time_week_select":
+            return self._handle_modify_week_date_selection(user_id, message)
         
         # Step 6: Handle time selection for modification
         elif state.get("step") == "modify_time_select":
@@ -2493,22 +2709,11 @@ class ReservationFlow:
             # Same date, just change time
             return self._show_available_times_for_date(user_id, reservation["date"])
         elif message.strip() == "2":
-            # User wants to change date
-            self.user_states[user_id]["step"] = "modify_time_input_date"
-            
-            # Get staff-specific calendar URL
-            staff_name = reservation.get('staff')
-            calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
-            
-            return f"""新しい日付を入力してください。
-
-🗓️ **Googleカレンダーで予約状況を確認：**
-🔗 {calendar_url}
-
-📅 日付の形式：YYYY-MM-DD
-例）2025-10-20
-
-変更をやめる場合は「キャンセル」とお送りください。"""
+            self.user_states[user_id]["step"] = "modify_time_week_select"
+            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                datetime.now().date()
+            ).strftime("%Y-%m-%d")
+            return self._build_date_week_selection_message(user_id, context="modify_time")
         else:
             return """番号を選択してください：
 
@@ -2565,7 +2770,11 @@ class ReservationFlow:
         )
         
         if not available_slots:
-            return f"申し訳ございませんが、{date}は空いている時間がありません。\n別の日付を選択してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
+            self.user_states[user_id]["step"] = "modify_time_week_select"
+            err = f"申し訳ございませんが、{date}は空いている時間がありません。\n別の日付を選択してください。"
+            return self._build_date_week_selection_message(
+                user_id, context="modify_time", error_prefix=err
+            )
         
         # Store the selected date and available slots
         self.user_states[user_id]["selected_date"] = date

@@ -20,5 +20,6 @@
   ],
   "booking_rules": {
     "slot_minutes": 30
-  }
+  },
+  "reservation_ui_limit_days": 45
 }
