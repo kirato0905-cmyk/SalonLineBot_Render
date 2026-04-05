@@ -455,11 +455,10 @@ class ReservationFlow:
                 if staff_name
                 else self.google_calendar.get_calendar_url()
             )
-            header = "📅 **ご希望の日付をお選びください**\n\n"
-            header += f"下のボタンから日付をタップできます（本日から{limit_days}日以内・空きのある営業日のみ表示）。\n"
-            header += f"{limit_days}日より先の日付は「YYYY-MM-DD」形式で手入力も可能です。\n\n"
-            header += f"🗓️ 空きの詳細確認（Googleカレンダー）：\n🔗 {calendar_url}\n\n"
-            trail = "❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"
+            header = "📅 ご希望の日付をお選びください😊👇\n"
+            header += f"空きのある営業日のみ表示しています。\n"
+            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力もできます。\n\n"
+            header += f"🗓️ 空きの詳細確認\n🔗 {calendar_url}\n\n"
         else:
             res = self.user_states[user_id].get("reservation_data") or {}
             staff_name = res.get("staff")
@@ -468,17 +467,15 @@ class ReservationFlow:
                 if staff_name
                 else self.google_calendar.get_calendar_url()
             )
-            header = "📅 **新しい日付をお選びください**\n\n"
-            header += f"下のボタンから日付をタップできます（本日から{limit_days}日以内・空きのある営業日のみ表示）。\n"
-            header += "それ以外の日付は「YYYY-MM-DD」形式で手入力も可能です。\n\n"
-            header += f"🗓️ 空きの詳細確認：\n🔗 {calendar_url}\n\n"
+            header = "📅 新しい日付をお選びください😊👇\n"
+            header += f"空きのある営業日のみ表示しています。\n"
+            header += "※{limit_days}日以降のご予約は「2026-01-07」のように手入力もできます。\n\n"
+            header += f"🗓️ 空きの詳細確認\n🔗 {calendar_url}\n\n"
             trail = "変更をやめる場合は「キャンセル」とお送りください。"
 
         body_note = ""
         if not bookable:
             body_note = (
-                "\n⚠️ この週に表示できる日付がありません。「次の週」でお進みいただくか、"
-                "日付を手入力してください。\n"
             )
 
         text = (f"{error_prefix}\n\n" if error_prefix else "") + header + body_note + trail
@@ -620,7 +617,7 @@ class ReservationFlow:
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             if user_id in self.user_states:
                 del self.user_states[user_id]
-            return "予約変更をキャンセルいたします。またのご利用をお待ちしております。"
+            return "予約変更をキャンセルいたします。またのご利用をお待ちしております!"
 
         today = datetime.now().date()
         min_ws = self._calendar_week_monday(today)
@@ -659,8 +656,7 @@ class ReservationFlow:
         if not selected_date:
             err = (
                 "申し訳ございませんが、日付の形式が正しくありません。\n"
-                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。\n"
-                "例）2026-01-15"
+                "「2026-01-07」の形式で入力するか、下の日付ボタンからお選びください。
             )
             return self._build_date_week_selection_message(
                 user_id, context="modify_time", error_prefix=err
@@ -671,7 +667,7 @@ class ReservationFlow:
         except ValueError:
             err = (
                 "申し訳ございませんが、日付の形式が正しくありません。\n"
-                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。"
+                "「2026-01-07」の形式で入力するか、下の日付ボタンからお選びください。"
             )
             return self._build_date_week_selection_message(
                 user_id, context="modify_time", error_prefix=err
