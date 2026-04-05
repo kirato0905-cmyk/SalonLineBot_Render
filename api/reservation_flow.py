@@ -1003,7 +1003,7 @@ class ReservationFlow:
         self.user_states[user_id]["data"]["staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
         staff_display = f"{selected_staff}さん" if selected_staff != "未指定" else selected_staff
-        intro = f"""担当者：{staff_display}を選択しました。
+        intro = f"""担当者：{staff_display}を選択されました
 
 """
         self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
