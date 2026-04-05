@@ -809,8 +809,8 @@ class ReservationFlow:
                 service_list.append(f"・{name}（{duration}分・{price:,}円）")
         services_text = "\n".join(service_list)
         menu_items = self._build_service_quick_reply_postback_items()
-        text = f"""ご予約ありがとうございます！
-どのサービスをご希望ですか？
+        text = f"""ご予約ありがとうございます😊
+メニューをお選びください👇
 
 {services_text}"""
         return self._quick_reply_return(text, menu_items, include_cancel=True)
@@ -883,7 +883,7 @@ class ReservationFlow:
             self.user_states[user_id]["step"] = "date_selection"
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
             intro = f"""{service_name}ですね！
-担当は{staff_display}で承ります。
+担当は{staff_display}で承ります😊
 
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
@@ -897,7 +897,7 @@ class ReservationFlow:
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
             intro = f"""{service_name}ですね！
-担当は{single_staff_name}さんで承ります。
+担当は{single_staff_name}さんで承ります😊
 
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
@@ -916,14 +916,10 @@ class ReservationFlow:
             staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
             staff_items.append({"label": staff_name, "text": staff_name})
         staff_text = "\n".join(staff_list)
-        text = f"""{service_name}ですね！
-担当の美容師をお選びください。
+        text = f"""{service_name}ですね😊
+担当スタッフをお選びください👇
 
-{staff_text}
-
-美容師名をお送りください。
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください。"""
+{staff_text}"""
         return self._quick_reply_return(text, staff_items)
 
     def _normalize_service_input(self, text: str) -> str:
@@ -968,7 +964,7 @@ class ReservationFlow:
         raw = message.strip()
         if any(keyword in raw for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております！"
         normalized_input = self._normalize_service_input(raw)
         matches = self._fallback_match_service_by_text(normalized_input)
         if not matches:
@@ -988,7 +984,7 @@ class ReservationFlow:
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております！"
         
         # Check for navigation to service selection
         service_change_keywords = self.navigation_keywords.get("service_change", [])
@@ -1031,7 +1027,7 @@ class ReservationFlow:
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております！"
 
         service_change_keywords = self.navigation_keywords.get("service_change", [])
         if any(keyword in message_normalized for keyword in service_change_keywords):
@@ -1075,8 +1071,7 @@ class ReservationFlow:
         if not selected_date:
             err = (
                 "申し訳ございませんが、日付の形式が正しくありません。\n"
-                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。\n"
-                "例）2026-01-15"
+                "「2026-01-07」の形式で入力するか、下の日付ボタンからお選びください。
             )
             return self._build_date_week_selection_message(
                 user_id, context="new_reservation", error_prefix=err
@@ -1087,7 +1082,7 @@ class ReservationFlow:
         except ValueError:
             err = (
                 "申し訳ございませんが、日付の形式が正しくありません。\n"
-                "「YYYY-MM-DD」の形式で入力するか、下の日付ボタンからお選びください。"
+                "「2026-01-07」の形式で入力するか、下の日付ボタンからお選びください。"
             )
             return self._build_date_week_selection_message(
                 user_id, context="new_reservation", error_prefix=err
@@ -1172,7 +1167,7 @@ class ReservationFlow:
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております!"
         
         # Check for navigation to date selection
         date_change_keywords = self.navigation_keywords.get("date_change", [])
