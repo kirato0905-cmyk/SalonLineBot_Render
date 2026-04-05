@@ -66,7 +66,7 @@ class ChatGPTFAQ:
                     context += "\n上記のKB情報のみを使用して回答してください。"
             
             response = self.client.chat.completions.create(
-                model="gpt-4-turbo",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": self.system_prompt + context},
                     {"role": "user", "content": user_message}
