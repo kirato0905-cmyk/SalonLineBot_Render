@@ -812,11 +812,7 @@ class ReservationFlow:
         text = f"""ご予約ありがとうございます！
 どのサービスをご希望ですか？
 
-{services_text}
-
-下のボタンからメニューをお選びください。
-
-※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
+{services_text}"""
         return self._quick_reply_return(text, menu_items, include_cancel=True)
 
     def _build_service_quick_reply_postback_items(self) -> List[Dict[str, str]]:
