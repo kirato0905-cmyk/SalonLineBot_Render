@@ -31,12 +31,13 @@ def send_faq_menu(reply_token, configuration):
         faq_list = faq_list[:10]  # 最大10件まで
         print(f"Loaded {len(faq_list)} FAQ items")
 
-        lines = ["よくある質問はこちらです：", ""]
+        lines = ["よくある質問はこちらです✨", "気になる内容があれば、番号(Q1～Q10)をそのままタップしてください！",""]
         for idx, faq in enumerate(faq_list, start=1):
             lines.append(f"Q{idx}. {faq['question']}")
 
         lines.append("")
-        lines.append("※質問番号（Q1～Q10）をお送りください。")
+        lines.append("📩上記以外でも、気になることがあればお気軽にメッセージください！")  
+        lines.append("そのままご予約もご案内できますので、お気軽にどうぞ✨")
 
         # Quick Reply: Q1～Q10 (no キャンセル per spec 3-1)
         qr_items = [QuickReplyItem(action=MessageAction(label=f"Q{i}", text=f"Q{i}")) for i in range(1, len(faq_list) + 1)]
