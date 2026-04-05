@@ -456,7 +456,7 @@ class ReservationFlow:
                 else self.google_calendar.get_calendar_url()
             )
             header = "📅 ご希望の日付をお選びください👇\n"
-            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
+            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。"
             trail = ""
         else:
             res = self.user_states[user_id].get("reservation_data") or {}
@@ -467,7 +467,7 @@ class ReservationFlow:
                 else self.google_calendar.get_calendar_url()
             )
             header = "📅 新しい日付をお選びください👇\n"
-            header += "{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
+            header += "{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。"
             trail = ""
 
         body_note = ""
