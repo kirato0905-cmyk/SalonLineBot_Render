@@ -908,7 +908,7 @@ class ReservationFlow:
             staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
             staff_items.append({"label": staff_name, "text": staff_name})
         staff_text = "\n".join(staff_list)
-        text = f"""{service_name}ですね。
+        text = f"""{service_name}で承ります。
 担当スタッフをお選びください👇
 
 {staff_text}"""
