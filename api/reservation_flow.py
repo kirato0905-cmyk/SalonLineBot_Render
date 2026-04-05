@@ -455,9 +455,8 @@ class ReservationFlow:
                 if staff_name
                 else self.google_calendar.get_calendar_url()
             )
-            header = "📅 ご希望の日付をお選びください😊👇\n"
-            header += f"空きのある営業日のみ表示しています。\n"
-            header += f"{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
+            header = "📅 ご希望の日付をお選びください👇\n"
+            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
             trail = ""
         else:
             res = self.user_states[user_id].get("reservation_data") or {}
@@ -467,8 +466,7 @@ class ReservationFlow:
                 if staff_name
                 else self.google_calendar.get_calendar_url()
             )
-            header = "📅 新しい日付をお選びください😊👇\n"
-            header += f"空きのある営業日のみ表示しています。\n"
+            header = "📅 新しい日付をお選びください👇\n"
             header += "{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
             trail = ""
 
@@ -877,7 +875,7 @@ class ReservationFlow:
             self.user_states[user_id]["step"] = "date_selection"
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
             intro = f"""{service_name}ですね！
-担当は{staff_display}で承ります😊
+担当は{staff_display}で承ります。
 
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
@@ -891,7 +889,7 @@ class ReservationFlow:
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
             intro = f"""{service_name}ですね！
-担当は{single_staff_name}さんで承ります😊
+担当は{single_staff_name}さんで承ります。
 
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
@@ -910,7 +908,7 @@ class ReservationFlow:
             staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
             staff_items.append({"label": staff_name, "text": staff_name})
         staff_text = "\n".join(staff_list)
-        text = f"""{service_name}ですね😊
+        text = f"""{service_name}ですね。
 担当スタッフをお選びください👇
 
 {staff_text}"""
@@ -958,7 +956,7 @@ class ReservationFlow:
         raw = message.strip()
         if any(keyword in raw for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております！"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
         normalized_input = self._normalize_service_input(raw)
         matches = self._fallback_match_service_by_text(normalized_input)
         if not matches:
@@ -978,7 +976,7 @@ class ReservationFlow:
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております！"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
         
         # Check for navigation to service selection
         service_change_keywords = self.navigation_keywords.get("service_change", [])
@@ -1021,7 +1019,7 @@ class ReservationFlow:
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております！"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
         service_change_keywords = self.navigation_keywords.get("service_change", [])
         if any(keyword in message_normalized for keyword in service_change_keywords):
