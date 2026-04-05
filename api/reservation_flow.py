@@ -656,7 +656,7 @@ class ReservationFlow:
         if not selected_date:
             err = (
                 "申し訳ございませんが、日付の形式が正しくありません。\n"
-                "「2026-01-07」の形式で入力するか、下の日付ボタンからお選びください。
+                "「2026-01-07」の形式で入力するか、下の日付ボタンからお選びください。"
             )
             return self._build_date_week_selection_message(
                 user_id, context="modify_time", error_prefix=err
