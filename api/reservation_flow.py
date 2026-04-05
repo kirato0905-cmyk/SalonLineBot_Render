@@ -457,8 +457,7 @@ class ReservationFlow:
             )
             header = "📅 ご希望の日付をお選びください😊👇\n"
             header += f"空きのある営業日のみ表示しています。\n"
-            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n\n"
-            header += f"🗓️ 空きの詳細確認\n🔗 {calendar_url}\n"
+            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
             trail = ""
         else:
             res = self.user_states[user_id].get("reservation_data") or {}
@@ -470,8 +469,7 @@ class ReservationFlow:
             )
             header = "📅 新しい日付をお選びください😊👇\n"
             header += f"空きのある営業日のみ表示しています。\n"
-            header += "※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n\n"
-            header += f"🗓️ 空きの詳細確認\n🔗 {calendar_url}\n"
+            header += "※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。\n"
             trail = ""
 
         body_note = ""
