@@ -1362,10 +1362,10 @@ class ReservationFlow:
         price_val = service_info.get("price", 0)
         text = f"""ご予約内容の確認です😊{adjustment_message}
         
-📅 日時：{selected_date} {start_time}~{end_time}
-💇 サービス：{service}
-👨‍💼 担当者：{staff}
-💰 料金：{price_val:,}円
+日時：{selected_date} {start_time}~{end_time}
+サービス：{service}
+担当者：{staff}
+料金：{price_val:,}円
 
 この内容で予約を確定しますか？"""
         return self._quick_reply_return(text, [{"label": "確定", "text": "確定"}])
@@ -1523,34 +1523,26 @@ class ReservationFlow:
             if is_modification and original_reservation:
                 # Modification completion message
                 original_time_display = f"{original_reservation['start_time']}~{original_reservation['end_time']}"
-                return f"""予約変更が完了しました。
-
-【元の予約】
-予約ID：{original_reservation['reservation_id']}
-{original_reservation['date']} / {original_time_display}
-担当：{original_reservation['staff']}
-メニュー：{original_reservation['service']}
-→ キャンセル済み
-
-【新しい予約】
+                return f"""予約の変更が完了しました😊
+                
 予約ID：{reservation_id}
-{reservation_data['date']} / {time_display}
+日時：{reservation_data['date']} / {time_display}
 担当：{reservation_data['staff']}
 メニュー：{reservation_data['service']}
-→ 予約済み
+料金：{service_info_for_confirm.get('price', 0):,}円
 
-ご予約ありがとうございました！"""
+ご来店をお待ちしております！"""
             else:
                 # Regular reservation confirmation message
-                return f"""✅ 予約が確定いたしました！
+                return f"""予約が確定しました😊
 
-🆔 予約ID：{reservation_id}
-📅 日時：{reservation_data['date']} {time_display}
-💇 サービス：{reservation_data['service']}
-👨‍💼 担当者：{reservation_data['staff']}
-💰 料金：{service_info_for_confirm.get('price', 0):,}円
+予約ID：{reservation_id}
+日時：{reservation_data['date']} {time_display}
+サービス：{reservation_data['service']}
+担当者：{reservation_data['staff']}
+料金：{service_info_for_confirm.get('price', 0):,}円
 
-当日はお時間までにお越しください。
+当日はお時間に余裕をもってお越しください。
 ご予約ありがとうございました！"""
     
     def _check_final_availability(self, reservation_data: Dict[str, Any]) -> Dict[str, Any]:
