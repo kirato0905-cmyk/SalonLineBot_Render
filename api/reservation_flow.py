@@ -2261,7 +2261,7 @@ class ReservationFlow:
         elif state.get("step") == "modify_re_reservation_confirm":
             return self._handle_re_reservation_confirmation(user_id, message)
         
-        return "予約変更フローに問題が発生しました。最初からやり直してください。"
+        return "予約変更フローに問題が発生しました。もう一度最初からお願いいたします。"
     
     def _show_user_reservations_for_modification(self, user_id: str) -> str:
         """Show user's reservations for modification selection"""
@@ -2276,7 +2276,7 @@ class ReservationFlow:
             reservations = sheets_logger.get_user_reservations(client_name)
             
             if not reservations:
-                return "申し訳ございませんが、あなたの予約が見つかりませんでした。\nスタッフまでお問い合わせください。"
+                return "申し訳ございませんが、あなたの予約が見つかりませんでした。"
             
             # Filter out past reservations by comparing with current time
             tokyo_tz = pytz.timezone('Asia/Tokyo')
@@ -2310,7 +2310,7 @@ class ReservationFlow:
                     continue
             
             if not future_reservations:
-                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。\n過去の予約は変更できません。"
+                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。"
             
             # Store only future reservations for selection
             self.user_states[user_id]["user_reservations"] = future_reservations
@@ -2330,22 +2330,17 @@ class ReservationFlow:
             
             text = f"""ご予約の変更ですね。
 
-あなたの予約一覧：
+お客様のご予約一覧：
 
 {chr(10).join(reservation_list)}
 
-変更したい予約の番号を入力してください。
-
-または、予約IDを直接入力することもできます。
-例）RES-20250115-0001
-
-変更をやめる場合は「キャンセル」とお送りください。"""
+変更される予約の番号をお選びください👇"""
             # Quick Reply: reservation buttons + キャンセル
             return self._quick_reply_return(text, quick_reply_items)
             
         except Exception as e:
             logging.error(f"Failed to show user reservations for modification: {e}")
-            return "申し訳ございません。予約検索中にエラーが発生しました。スタッフまでお問い合わせください。"
+            return "申し訳ございません。予約検索中にエラーが発生しました。もう一度最初からお願いいたします。"
     
     def _handle_modify_reservation_selection(self, user_id: str, message: str) -> str:
         """Handle reservation selection for modification"""
@@ -2385,23 +2380,18 @@ class ReservationFlow:
                     menu_items = [{"label": s.get("name", sid), "text": s.get("name", sid)} for sid, s in self.services.items()]
                     service_list = [f"・{s.get('name', sid)}（{s.get('duration', 60)}分・{s.get('price', 3000):,}円）" for sid, s in self.services.items()]
                     services_text = "\n".join(service_list)
-                    text = f"""この予約を変更します。
+                    text = f"""この予約を変更いたします。
+                    
+予約ID：{selected_reservation['reservation_id']}
+日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
+サービス：{selected_reservation['service']}
+担当者：{selected_reservation['staff']}
 
-📋 **現在の予約内容：**
-🆔 予約ID：{selected_reservation['reservation_id']}
-📅 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
-💇 サービス：{selected_reservation['service']}
-👨‍💼 担当者：{selected_reservation['staff']}
+最初から新しい予約を作成してください。
 
-新しい予約を作成してください。新しい予約が確定した時点で、元の予約は自動的にキャンセルされます。
+メニューをお選びください👇
 
-どのサービスをご希望ですか？
-
-{services_text}
-
-サービス名をお送りください。
-
-※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
+{services_text}"""
                     return self._quick_reply_return(text, menu_items)
                 else:
                     return self._quick_reply_return("申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。\n\n変更をやめる場合は「キャンセル」とお送りください。", [])
@@ -2425,23 +2415,18 @@ class ReservationFlow:
                     menu_items = [{"label": s.get("name", sid), "text": s.get("name", sid)} for sid, s in self.services.items()]
                     service_list = [f"・{s.get('name', sid)}（{s.get('duration', 60)}分・{s.get('price', 3000):,}円）" for sid, s in self.services.items()]
                     services_text = "\n".join(service_list)
-                    text = f"""この予約を変更します。
+                    text = f"""この予約を変更いたします。
+                    
+ 予約ID：{selected_reservation['reservation_id']}
+ 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
+ サービス：{selected_reservation['service']}
+ 担当者：{selected_reservation['staff']}
 
-📋 **現在の予約内容：**
-🆔 予約ID：{selected_reservation['reservation_id']}
-📅 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
-💇 サービス：{selected_reservation['service']}
-👨‍💼 担当者：{selected_reservation['staff']}
+最初から新しい予約を作成してください。
 
-新しい予約を作成してください。新しい予約が確定した時点で、元の予約は自動的にキャンセルされます。
+メニューをお選びください👇
 
-どのサービスをご希望ですか？
-
-{services_text}
-
-サービス名をお送りください。
-
-※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
+{services_text}"""
                     return self._quick_reply_return(text, menu_items)
                 else:
                     return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
@@ -2450,7 +2435,7 @@ class ReservationFlow:
                 
         except Exception as e:
             logging.error(f"Reservation selection for modification failed: {e}")
-            return "申し訳ございません。予約選択中にエラーが発生しました。スタッフまでお問い合わせください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
+            return "申し訳ございません。予約選択中にエラーが発生しました。もう一度お試しください。\n\n変更をやめる場合は「キャンセル」とお送りください。"
     
     def _handle_field_selection(self, user_id: str, message: str) -> str:
         """Handle field selection for modification"""
@@ -3167,12 +3152,7 @@ class ReservationFlow:
             
             # Check if within 2 hours (120 minutes)
             if time_diff.total_seconds() <= 7200:  # 2 hours = 7200 seconds
-                return f"""申し訳ございませんが、予約開始時刻の2時間以内の変更はお受けできません。
-
-📅 予約日時：{reservation_date} {reservation_start_time}
-⏰ 現在時刻：{current_time.strftime('%Y-%m-%d %H:%M')}
-⏱️ 残り時間：{int(time_diff.total_seconds() / 3600)}時間{int((time_diff.total_seconds() % 3600) / 60)}分
-💰 料金：{reservation['price']:,}円
+                return f"""申し訳ございませんが、予約開始時刻の2時間以内の変更はお受けいたしかねます。
 
 緊急の場合は直接サロンまでお電話ください。"""
             
