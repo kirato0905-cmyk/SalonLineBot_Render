@@ -1181,7 +1181,7 @@ class ReservationFlow:
             service_duration = (self._get_service_by_id(sid) or {}).get("duration", 60) if sid else self.user_states[user_id].get("time_selection_service_duration", 60)
             filtered_periods = self.user_states[user_id].get("time_filtered_periods", [])
             period_strings = [f"・{p['time']}~{p['end_time']}" for p in filtered_periods]
-            text = f"""{selected_date}ですね！
+            text = f"""{selected_date}ですね😊
 {service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです。
 ご希望の時間をお選びください👇"""
             return self._build_time_selection_quick_reply(user_id, text, new_page)
