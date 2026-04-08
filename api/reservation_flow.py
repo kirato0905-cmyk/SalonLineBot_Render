@@ -1136,12 +1136,7 @@ class ReservationFlow:
                     else:
                         time_message = f"{hours}時間{minutes}分"
                 
-                error_message = f"""申し訳ございませんが、ご予約は来店の2時間前までにお取りいただけます。
-
-📅 ご希望の日時：{date_str} {start_time} (東京時間)
-⏰ 現在時刻：{current_datetime.strftime('%Y-%m-%d %H:%M')} (東京時間)
-⏱️ 必要時間：あと{time_message}お待ちください
-
+                error_message = f"""申し訳ございませんが、ご予約は来店の2時間前までにお取りください。
 2時間以上先の時間帯をご選択ください。"""
                 
                 return False, error_message
@@ -1159,7 +1154,7 @@ class ReservationFlow:
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております!"
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
         
         # Check for navigation to date selection
         date_change_keywords = self.navigation_keywords.get("date_change", [])
@@ -1187,14 +1182,8 @@ class ReservationFlow:
             filtered_periods = self.user_states[user_id].get("time_filtered_periods", [])
             period_strings = [f"・{p['time']}~{p['end_time']}" for p in filtered_periods]
             text = f"""{selected_date}ですね！
-{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです：
-
-{chr(10).join(period_strings)}
-
-ご希望の開始時間をお送りください。
-例）10:00 または 10:30
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
+{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです。
+ご希望の時間をお選びください👇"""
             return self._build_time_selection_quick_reply(user_id, text, new_page)
         
         selected_date = self.user_states[user_id]["data"]["date"]
