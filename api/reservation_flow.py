@@ -455,8 +455,8 @@ class ReservationFlow:
                 if staff_name
                 else self.google_calendar.get_calendar_url()
             )
-            header = "📅 ご希望の日付をお選びください👇\n"
-            header += f"※{limit_days}日以降のご予約は「2026-01-07」のように手入力でお願いいたします。"
+            header = "📅 ご希望の日付をお選びください👇\n\n"
+            header += f"※{limit_days}日以降のご予約をされる場合は「2026-01-07」のように手入力でお願いいたします。"
             trail = ""
         else:
             res = self.user_states[user_id].get("reservation_data") or {}
@@ -595,15 +595,9 @@ class ReservationFlow:
                 f"{original_reservation.get('end_time')}）も選択できます。"
             )
 
-        text = f"""{selected_date}ですね！
-{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです：
-
-{chr(10).join(period_strings)}{modification_note}
-
-ご希望の開始時間をお送りください。
-例）10:00 または 10:30
-
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
+        text = f"""{selected_date}ですね。
+{service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです。
+ご希望の時間をお選びください👇"""
         return self._build_time_selection_quick_reply(user_id, text, page=0)
 
     def _handle_modify_week_date_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
@@ -787,7 +781,7 @@ class ReservationFlow:
         elif step == "confirmation":
             return self._handle_confirmation(user_id, message)
         else:
-            return "予約フローに問題が発生しました。もう一度最初からお願いいたします。"
+            return "エラーが発生しました。もう一度最初からお願いいたします。"
     
     def _start_reservation(self, user_id: str) -> Union[str, Dict[str, Any]]:
         """Start reservation process. Quick Reply is postback (action=select_service&service_id=...). Spec 3-1."""
@@ -1001,7 +995,7 @@ class ReservationFlow:
         self.user_states[user_id]["data"]["staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
         staff_display = f"{selected_staff}さん" if selected_staff != "未指定" else selected_staff
-        intro = f"""担当者：{staff_display}を選択されました。
+        intro = f"""担当者：{staff_display}ですね。
 
 """
         self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
@@ -1365,11 +1359,14 @@ class ReservationFlow:
         
         duration_min = service_info.get("duration", 60)
         price_val = service_info.get("price", 0)
-        text = f"""予約内容のご確認をお願いいたします。{adjustment_message}
+        text = f"""ご予約内容の確認です😊。{adjustment_message}
+        
 📅 日時：{selected_date} {start_time}~{end_time}
 💇 サービス：{service}
 👨‍💼 担当者：{staff}
-💰 料金：{price_val:,}円"""
+💰 料金：{price_val:,}円
+
+この内容で予約を確定しますか？"""
         return self._quick_reply_return(text, [{"label": "確定", "text": "確定"}])
 
     def _handle_confirmation(self, user_id: str, message: str) -> str:
