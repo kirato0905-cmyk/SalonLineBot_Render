@@ -602,13 +602,13 @@ class ReservationFlow:
 {service_name}（{service_duration}分）の空き状況はこちら。
 
 【🔥おすすめ】
-　・10:00～(一番人気)
-  ・11:00～
+・10:00～(一番人気)
+・11:00～
 
 【その他】
-　・13:00～
-　・15:00～(比較的ゆったり)
-　・17:00～
+・13:00～
+・15:00～(比較的ゆったり)
+・17:00～
 
 ご希望の時間をお選びください👇"""
         return self._build_time_selection_quick_reply(user_id, text, page=0)
@@ -927,7 +927,7 @@ class ReservationFlow:
             staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
             staff_items.append({"label": staff_name, "text": staff_name})
         staff_text = "\n".join(staff_list)
-        text = f"""{service_name}で承ります。
+        text = f"""{service_name}ですね👌
         
 担当スタッフをお選びください👇
 
@@ -1218,13 +1218,13 @@ class ReservationFlow:
 {service_name}（{service_duration}分）の空き状況はこちら。
 
 【🔥おすすめ】
-　・10:00～(一番人気)
-  ・11:00～
+・10:00～(一番人気)
+・11:00～
 
 【その他】
-　・13:00～
-　・15:00～(比較的ゆったり)
-　・17:00～
+・13:00～
+・15:00～(比較的ゆったり)
+・17:00～
 
 ご希望の時間をお選びください👇"""
             return self._build_time_selection_quick_reply(user_id, text, new_page)
@@ -1872,7 +1872,7 @@ class ReservationFlow:
             
             text = f"""ご予約のキャンセルですね😊
 
-            キャンセルする予約をお選びください👇
+キャンセルする予約をお選びください👇
 
 {chr(10).join(reservation_list)}"""
             return self._quick_reply_return(text, quick_reply_items)
@@ -1910,13 +1910,11 @@ class ReservationFlow:
                     staff_name = selected_reservation.get('staff')
                     calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
-                    text = f"""こちらのご予約をキャンセルします。
+                    text = f"""こちらのご予約をキャンセルしてよろしいですか？。
 
  📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
  💇：{selected_reservation['service']}
- 👤：{selected_reservation['staff']}
-
-よろしいですか？"""
+ 👤：{selected_reservation['staff']}"""
                     return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
                 else:
                     return self._quick_reply_return("申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。", [])
@@ -1935,13 +1933,11 @@ class ReservationFlow:
                     staff_name = selected_reservation.get('staff')
                     calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
-                    text = f"""こちらのご予約をキャンセルします。
+                    text = f"""こちらのご予約をキャンセルしてよろしいですか？。
 
  📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
  💇：{selected_reservation['service']}
- 👤：{selected_reservation['staff']}
-
-よろしいですか？"""
+ 👤：{selected_reservation['staff']}"""
                     return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
                 else:
                     return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。"
@@ -1950,7 +1946,7 @@ class ReservationFlow:
                 
         except Exception as e:
             logging.error(f"Reservation selection for cancellation failed: {e}")
-            return "申し訳ございません。予約選択中にエラーが発生しました。\nもう一度お試しください。"
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
     
     def _handle_cancel_confirmation(self, user_id: str, message: str) -> str:
         """Handle cancellation confirmation"""
@@ -2035,8 +2031,7 @@ class ReservationFlow:
             
             return f"""✅キャンセルが完了しました。
             
-             ご都合が合う日があれば、
-　　　　　　　いつでもご予約お待ちしております😊"""
+ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
                 
         except Exception as e:
             logging.error(f"Reservation cancellation execution failed: {e}")
@@ -2061,14 +2056,9 @@ class ReservationFlow:
             if not calendar_success:
                 logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
             
-            return f"""✅ 以下の予約のキャンセルが完了しました！
-
-予約ID：{reservation_id}
-日時：{reservation['date']} {reservation['start_time']}~{reservation['end_time']}
-サービス：{reservation['service']}
-担当者：{reservation['staff']}
-
-またのご利用をお待ちしております。"""
+            return f"""✅キャンセルが完了しました。
+            
+ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
                 
         except Exception as e:
             logging.error(f"Reservation ID cancellation failed: {e}")
