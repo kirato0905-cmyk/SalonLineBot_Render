@@ -1743,7 +1743,7 @@ class ReservationFlow:
             if any(keyword in message_normalized for keyword in flow_cancel_keywords):
                 if user_id in self.user_states:
                     del self.user_states[user_id]
-                return "キャンセルをキャンセルいたします。またのご利用をお待ちしております。"
+                return "予約取り消しをキャンセルいたします。またのご利用をお待ちしております。"
         
         # Step 1: Start cancellation flow - show user's reservations
         if not state or state.get("step") not in ["cancel_select_reservation", "cancel_confirm"]:
@@ -1758,7 +1758,7 @@ class ReservationFlow:
         elif state.get("step") == "cancel_confirm":
             return self._handle_cancel_confirmation(user_id, message)
         
-        return "キャンセルフローに問題が発生しました。最初からやり直してください。"
+        return "エラーが発生しました。もう一度お試しください。"
     
     def _show_user_reservations_for_cancellation(self, user_id: str) -> str:
         """Show user's reservations for cancellation selection"""
@@ -1774,7 +1774,7 @@ class ReservationFlow:
             print(f"Found {len(reservations) if reservations else 0} reservations for client: {client_name}")
             
             if not reservations:
-                return "申し訳ございませんが、あなたの予約が見つかりませんでした。\nスタッフまでお問い合わせください。"
+                return "申し訳ございませんが、あなたの予約が見つかりませんでした。"
             
             # Filter out past reservations by comparing with current time
             tokyo_tz = pytz.timezone('Asia/Tokyo')
@@ -1827,17 +1827,12 @@ class ReservationFlow:
 
 {chr(10).join(reservation_list)}
 
-キャンセルしたい予約の番号を入力してください。
-
-または、予約IDを直接入力することもできます。
-例）RES-20250115-0001
-
-❌ 取り消しをやめる場合は「キャンセル」とお送りください"""
+キャンセルしたい予約の番号を入力してください👇"""
             return self._quick_reply_return(text, quick_reply_items)
             
         except Exception as e:
             logging.error(f"Failed to show user reservations for cancellation: {e}")
-            return "申し訳ございません。予約検索中にエラーが発生しました。スタッフまでお問い合わせください。"
+            return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
     
     def _handle_cancel_reservation_selection(self, user_id: str, message: str) -> str:
         """Handle reservation selection for cancellation"""
@@ -1868,21 +1863,14 @@ class ReservationFlow:
                     staff_name = selected_reservation.get('staff')
                     calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
-                    text = f"""キャンセルする予約を確認してください：
+                    text = f"""キャンセルする予約を確認してください😊
+                    
+ 予約ID：{selected_reservation['reservation_id']}
+ 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
+ サービス：{selected_reservation['service']}
+ 担当者：{selected_reservation['staff']}
 
-📋 予約内容：
-🆔 予約ID：{selected_reservation['reservation_id']}
-📅 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
-💇 サービス：{selected_reservation['service']}
-👨‍💼 担当者：{selected_reservation['staff']}
-
-🗓️ **Googleカレンダーで予約状況を確認：**
-🔗 {calendar_url}
-
-この予約をキャンセルしますか？
-「はい」または「確定」とお送りください。
-
-❌ 取り消しをやめる場合は「キャンセル」とお送りください。"""
+この予約をキャンセルされますか？"""
                     return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
                 else:
                     return self._quick_reply_return("申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。", [])
@@ -1901,21 +1889,14 @@ class ReservationFlow:
                     staff_name = selected_reservation.get('staff')
                     calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
-                    text = f"""キャンセルする予約を確認してください：
+                    text = f"""キャンセルする予約を確認してください😊
+                    
+ 予約ID：{selected_reservation['reservation_id']}
+ 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
+ サービス：{selected_reservation['service']}
+ 担当者：{selected_reservation['staff']}
 
-📋 予約内容：
-🆔 予約ID：{selected_reservation['reservation_id']}
-📅 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
-💇 サービス：{selected_reservation['service']}
-👨‍💼 担当者：{selected_reservation['staff']}
-
-🗓️ **Googleカレンダーで予約状況を確認：**
-🔗 {calendar_url}
-
-この予約をキャンセルしますか？
-「はい」または「確定」とお送りください。
-
-❌ 取り消しをやめる場合は「キャンセル」とお送りください。"""
+この予約をキャンセルしますか？"""
                     return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
                 else:
                     return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。"
@@ -1924,7 +1905,7 @@ class ReservationFlow:
                 
         except Exception as e:
             logging.error(f"Reservation selection for cancellation failed: {e}")
-            return "申し訳ございません。予約選択中にエラーが発生しました。スタッフまでお問い合わせください。"
+            return "申し訳ございません。予約選択中にエラーが発生しました。\nもう一度お試しください。"
     
     def _handle_cancel_confirmation(self, user_id: str, message: str) -> str:
         """Handle cancellation confirmation"""
@@ -1941,7 +1922,7 @@ class ReservationFlow:
         elif any(keyword in message for keyword in no_keywords):
             # Cancel the cancellation
             del self.user_states[user_id]
-            return "キャンセルをキャンセルいたします。予約はそのまま残ります。\nまたのご利用をお待ちしております。"
+            return "予約取り消しをキャンセルいたします。予約はそのまま残ります。\nまたのご利用をお待ちしております。"
         else:
             return "「はい」または「確定」でキャンセルを確定するか、「キャンセル」で中止してください。"
     
@@ -1971,10 +1952,6 @@ class ReservationFlow:
             if time_diff.total_seconds() <= 7200:  # 2 hours = 7200 seconds
                 return f"""申し訳ございませんが、予約開始時刻の2時間以内のキャンセルはお受けできません。
 
-📅 予約日時：{reservation_date} {reservation_start_time}
-⏰ 現在時刻：{current_time.strftime('%Y-%m-%d %H:%M')}
-⏱️ 残り時間：{int(time_diff.total_seconds() / 3600)}時間{int((time_diff.total_seconds() % 3600) / 60)}分
-
 緊急の場合は直接サロンまでお電話ください。"""
             
         except Exception as e:
@@ -1991,7 +1968,7 @@ class ReservationFlow:
             sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
             
             if not sheets_success:
-                return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
+                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
             
             # Remove from Google Calendar (use staff name from reservation data)
             staff_name = reservation.get("staff")
@@ -2011,19 +1988,18 @@ class ReservationFlow:
             # Clear user state
             del self.user_states[user_id]
             
-            return f"""✅ 予約のキャンセルが完了しました！
+            return f"""✅ 以下の予約のキャンセルが完了しました！
 
-📋 キャンセル内容：
-🆔 予約ID：{reservation_id}
-📅 日時：{reservation['date']} {reservation['start_time']}~{reservation['end_time']}
-💇 サービス：{reservation['service']}
-👨‍💼 担当者：{reservation['staff']}
+予約ID：{reservation_id}
+日時：{reservation['date']} {reservation['start_time']}~{reservation['end_time']}
+サービス：{reservation['service']}
+担当者：{reservation['staff']}
 
 またのご利用をお待ちしております。"""
                 
         except Exception as e:
             logging.error(f"Reservation cancellation execution failed: {e}")
-            return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください"
 
     def _handle_reservation_id_cancellation(self, user_id: str, reservation_id: str) -> str:
         """Handle direct reservation cancellation by ID"""
@@ -2034,7 +2010,7 @@ class ReservationFlow:
             sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
             
             if not sheets_success:
-                return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
+                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
             
             # Remove from Google Calendar
             # Note: For direct reservation ID cancellation, we need to search all calendars
@@ -2044,16 +2020,18 @@ class ReservationFlow:
             if not calendar_success:
                 logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
             
-            return f"""✅ 予約のキャンセルが完了しました！
+            return f"""✅ 以下の予約のキャンセルが完了しました！
 
-📋 キャンセル内容：
-• 予約ID：{reservation_id}
+予約ID：{reservation_id}
+日時：{reservation['date']} {reservation['start_time']}~{reservation['end_time']}
+サービス：{reservation['service']}
+担当者：{reservation['staff']}
 
 またのご利用をお待ちしております。"""
                 
         except Exception as e:
             logging.error(f"Reservation ID cancellation failed: {e}")
-            return "申し訳ございません。キャンセル処理中にエラーが発生しました。\nスタッフまでお問い合わせください。"
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
 
 
     def _normalize_time_format(self, time_str: str) -> str:
@@ -2261,7 +2239,7 @@ class ReservationFlow:
         elif state.get("step") == "modify_re_reservation_confirm":
             return self._handle_re_reservation_confirmation(user_id, message)
         
-        return "予約変更フローに問題が発生しました。もう一度最初からお願いいたします。"
+        return "エラーが発生しました。もう一度お試しください"
     
     def _show_user_reservations_for_modification(self, user_id: str) -> str:
         """Show user's reservations for modification selection"""
@@ -2340,7 +2318,7 @@ class ReservationFlow:
             
         except Exception as e:
             logging.error(f"Failed to show user reservations for modification: {e}")
-            return "申し訳ございません。予約検索中にエラーが発生しました。もう一度最初からお願いいたします。"
+            return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
     
     def _handle_modify_reservation_selection(self, user_id: str, message: str) -> str:
         """Handle reservation selection for modification"""
@@ -2380,14 +2358,15 @@ class ReservationFlow:
                     menu_items = [{"label": s.get("name", sid), "text": s.get("name", sid)} for sid, s in self.services.items()]
                     service_list = [f"・{s.get('name', sid)}（{s.get('duration', 60)}分・{s.get('price', 3000):,}円）" for sid, s in self.services.items()]
                     services_text = "\n".join(service_list)
-                    text = f"""この予約を変更いたします。
+                    text = f"""以下の予約を変更いたします。
                     
 予約ID：{selected_reservation['reservation_id']}
 日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
 サービス：{selected_reservation['service']}
 担当者：{selected_reservation['staff']}
 
-最初から新しい予約を作成してください。
+
+最初から新しい予約を作成していただきます。
 
 メニューをお選びください👇
 
@@ -2415,14 +2394,14 @@ class ReservationFlow:
                     menu_items = [{"label": s.get("name", sid), "text": s.get("name", sid)} for sid, s in self.services.items()]
                     service_list = [f"・{s.get('name', sid)}（{s.get('duration', 60)}分・{s.get('price', 3000):,}円）" for sid, s in self.services.items()]
                     services_text = "\n".join(service_list)
-                    text = f"""この予約を変更いたします。
+                    text = f"""以下の予約を変更いたします。
                     
  予約ID：{selected_reservation['reservation_id']}
  日時：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
  サービス：{selected_reservation['service']}
  担当者：{selected_reservation['staff']}
 
-最初から新しい予約を作成してください。
+最初から新しい予約を作成していただきます。
 
 メニューをお選びください👇
 
