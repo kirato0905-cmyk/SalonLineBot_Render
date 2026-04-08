@@ -613,7 +613,7 @@ class ReservationFlow:
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             if user_id in self.user_states:
                 del self.user_states[user_id]
-            return "予約変更をキャンセルいたします。またのご利用をお待ちしております!"
+            return "予約変更をキャンセルいたします。またのご利用をお待ちしております。"
 
         today = datetime.now().date()
         min_ws = self._calendar_week_monday(today)
@@ -787,7 +787,7 @@ class ReservationFlow:
         elif step == "confirmation":
             return self._handle_confirmation(user_id, message)
         else:
-            return "予約フローに問題が発生しました。最初からやり直してください。"
+            return "予約フローに問題が発生しました。もう一度最初からお願いいたします。"
     
     def _start_reservation(self, user_id: str) -> Union[str, Dict[str, Any]]:
         """Start reservation process. Quick Reply is postback (action=select_service&service_id=...). Spec 3-1."""
@@ -820,12 +820,12 @@ class ReservationFlow:
     def start_reservation_with_service(self, user_id: str, service_identifier: str) -> Union[str, Dict[str, Any]]:
         """Start reservation with service_id from postback only. No name/string matching. Spec 3-2."""
         if not service_identifier or not str(service_identifier).strip():
-            text = "メニューを選び直してください。"
+            text = "もう一度メニューをお選びください。"
             return self._quick_reply_return(text, self._build_service_quick_reply_postback_items(), include_cancel=True)
         service_id = str(service_identifier).strip()
         svc = self._get_service_by_id(service_id)
         if not svc:
-            text = "メニューを選び直してください。"
+            text = "もう一度メニューをお選びください。"
             return self._quick_reply_return(text, self._build_service_quick_reply_postback_items(), include_cancel=True)
         self.user_states[user_id] = {
             "step": "service_selection",
@@ -874,9 +874,8 @@ class ReservationFlow:
             self.user_states[user_id]["data"]["staff"] = preselected_staff
             self.user_states[user_id]["step"] = "date_selection"
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
-            intro = f"""{service_name}ですね！
+            intro = f"""{service_name}ですね。
 担当は{staff_display}で承ります。
-
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
                 datetime.now().date()
@@ -888,9 +887,8 @@ class ReservationFlow:
             single_staff_name = self._get_single_staff_name()
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
-            intro = f"""{service_name}ですね！
+            intro = f"""{service_name}ですね。
 担当は{single_staff_name}さんで承ります。
-
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
                 datetime.now().date()
@@ -1081,7 +1079,7 @@ class ReservationFlow:
             )
 
         if date_obj < today:
-            err = "過去の日付は選択できません。\n本日以降の日付を入力してください。"
+            err = "過去の日付は選択いたしかねます。\n本日以降の日付を入力してください。"
             return self._build_date_week_selection_message(
                 user_id, context="new_reservation", error_prefix=err
             )
@@ -1181,7 +1179,7 @@ class ReservationFlow:
             service_duration = (self._get_service_by_id(sid) or {}).get("duration", 60) if sid else self.user_states[user_id].get("time_selection_service_duration", 60)
             filtered_periods = self.user_states[user_id].get("time_filtered_periods", [])
             period_strings = [f"・{p['time']}~{p['end_time']}" for p in filtered_periods]
-            text = f"""{selected_date}ですね😊
+            text = f"""{selected_date}ですね。
 {service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです。
 ご希望の時間をお選びください👇"""
             return self._build_time_selection_quick_reply(user_id, text, new_page)
@@ -1208,7 +1206,7 @@ class ReservationFlow:
                 
         except Exception as e:
             logging.error(f"Error getting available slots: {e}")
-            return f"申し訳ございません。空き時間の取得中にエラーが発生しました。\nスタッフまでお問い合わせください。"
+            return f"申し訳ございません。エラーが発生しました。\n「キャンセル」とお送りしていただき、もう一度最初からお願いいたします。"
 
         # Parse start time from user input (only start time needed now)
         start_time = self._parse_single_time(message.strip())
@@ -1367,17 +1365,11 @@ class ReservationFlow:
         
         duration_min = service_info.get("duration", 60)
         price_val = service_info.get("price", 0)
-        text = f"""予約内容の確認です：{adjustment_message}
+        text = f"""予約内容のご確認をお願いいたします。{adjustment_message}
 📅 日時：{selected_date} {start_time}~{end_time}
 💇 サービス：{service}
 👨‍💼 担当者：{staff}
-⏱️ 所要時間：{duration_min}分
-💰 料金：{price_val:,}円
-
-この内容で予約を確定しますか？
-「はい」または「確定」とお送りください。
-
-※予約をキャンセルされる場合は「キャンセル」とお送りください。"""
+💰 料金：{price_val:,}円"""
         return self._quick_reply_return(text, [{"label": "確定", "text": "確定"}])
 
     def _handle_confirmation(self, user_id: str, message: str) -> str:
@@ -1392,7 +1384,7 @@ class ReservationFlow:
             # Ensure staff is in reservation_data
             if 'staff' not in reservation_data or not reservation_data.get('staff'):
                 logging.error(f"[_handle_confirmation] ERROR: Staff not found in reservation_data! Data: {reservation_data}")
-                return "申し訳ございませんが、予約処理中にエラーが発生しました。担当者の情報が見つかりませんでした。最初からやり直してください。"
+                return "申し訳ございませんがエラーが発生しました。「キャンセル」とお送りして、もう一度最初からやり直してください。"
             
             # Normalize reservation_data: ensure service_id and service (name) for calendar/sheets
             sid = reservation_data.get("service_id") or self._get_service_id_by_name(reservation_data.get("service"))
