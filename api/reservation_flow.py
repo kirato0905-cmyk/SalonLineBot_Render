@@ -894,7 +894,7 @@ class ReservationFlow:
             self.user_states[user_id]["data"]["staff"] = preselected_staff
             self.user_states[user_id]["step"] = "date_selection"
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
-            intro = f"""{service_name}ですね。
+            intro = f"""{service_name}ですね👌
 担当者は{staff_display}になります😊
 """
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
@@ -927,7 +927,7 @@ class ReservationFlow:
             staff_list.append(f"・{staff_name}（{specialty}・{experience}）")
             staff_items.append({"label": staff_name, "text": staff_name})
         staff_text = "\n".join(staff_list)
-        text = f"""{service_name}ですね👌
+        text = f"""{service_name}承ります👌
         
 担当スタッフをお選びください👇
 
@@ -1910,7 +1910,7 @@ class ReservationFlow:
                     staff_name = selected_reservation.get('staff')
                     calendar_url = self._get_staff_calendar_url(staff_name) if staff_name else self.google_calendar.get_calendar_url()
                     
-                    text = f"""こちらのご予約をキャンセルしてよろしいですか？。
+                    text = f"""こちらのご予約をキャンセルしてよろしいですか？
 
  📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
  💇：{selected_reservation['service']}
