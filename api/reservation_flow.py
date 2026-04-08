@@ -597,6 +597,7 @@ class ReservationFlow:
 
         text = f"""{selected_date}ですね。
 {service_name}（{service_duration}分）の予約可能な時間帯は以下の通りです。
+
 ご希望の時間をお選びください👇"""
         return self._build_time_selection_quick_reply(user_id, text, page=0)
 
@@ -1359,7 +1360,7 @@ class ReservationFlow:
         
         duration_min = service_info.get("duration", 60)
         price_val = service_info.get("price", 0)
-        text = f"""ご予約内容の確認です😊。{adjustment_message}
+        text = f"""ご予約内容の確認です😊{adjustment_message}
         
 📅 日時：{selected_date} {start_time}~{end_time}
 💇 サービス：{service}
