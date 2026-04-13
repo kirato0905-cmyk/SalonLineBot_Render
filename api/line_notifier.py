@@ -109,12 +109,12 @@ class LineNotifier:
     
     def notify_user_login(self, user_id: str, display_name: str) -> bool:
         """Send notification when user logs in"""
-        message = f"👤名前: {display_name}\n"
-        message += f"🪪ID: `{user_id}`\n"
+        message = f"👤名前: {display_name}\n\n"
+        message += f"🪪ID: `{user_id}`"
         
         return self.send_notification(
             message=message,
-            title="🔔ユーザーログイン"
+            title="ユーザーログイン"
         )
     
     def notify_reservation_confirmation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
