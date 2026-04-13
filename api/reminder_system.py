@@ -269,10 +269,15 @@ class ReminderSystem:
             
             # Prepare reminder message using the template format
             message = f"{user_name} 様\n"
-            message += f"明日（{reservation_date}）{start_time} から {service}（担当：{staff}）のご予約です。\n\n"
-            message += f"・所要時間：{duration}\n"
-            message += f"・変更／キャンセル：変更・キャンセルされる場合は{cancel_deadline}までに「時間を変更したい」「予約をキャンセル」したいとお送りして指示に従ってください。\n\n"
-            message += f"ご不明点は {salon_phone} まで。{salon_name}"
+            message += f"明日（{reservation_date}）{start_time} より {service}（担当：{staff}）のご予約を承っております😊\n\n"
+            message += f"⏰所要時間：{duration}\n\n"
+            message += f"当日はしっかりカウンセリングを行い、ご自宅でも扱いやすく、再現しやすいスタイルに仕上げますのでご安心ください。\n\n"
+            message += f"また、最近は乾燥・広がり対策でトリートメントを一緒にされる方が増えています。\n"
+            message += f"👉当日追加も可能です\n\n" 
+            message += f"※変更・キャンセルは{cancel_deadline}までにメニューからお手続きください。\n\n"
+            message += f"明日のご来店を心よりお待ちしております✨\n"
+            message += f"{salon_name}\n"
+            message += f"{salon_phone}"
             
             # Send LINE message
             payload = {
