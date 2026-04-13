@@ -123,8 +123,8 @@ class LineNotifier:
         staff_name = reservation_data.get('staff')
         calendar_url = self._get_calendar_url(staff_name)
         message = f"👤: {client_name}\n"
-        message += f"📅: {reservation_data.get('date', 'N/A')}　 {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
-        message += f"💇: {reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
+        message += f"📅: {reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
+        message += f"💇: {reservation_data.get('service', 'N/A')}（{reservation_data.get('staff', 'N/A')}）\n"
         message += f"💰: ¥{self._get_service_price(reservation_data.get('service', '')):,}\n\n"
         message += f"🆔 : {reservation_data.get('reservation_id', 'N/A')}" 
         
@@ -144,24 +144,17 @@ class LineNotifier:
         old_time = f"{old_reservation.get('start_time', 'N/A')}~{old_reservation.get('end_time', 'N/A')}"
         # Format new reservation time
         new_time = f"{new_reservation.get('start_time', 'N/A')}~{new_reservation.get('end_time', 'N/A')}"
-        
-        message = f"予約変更\n\n"
-        message += f"【元の予約】\n"
-        message += f"• 日付: {old_reservation.get('date', 'N/A')}\n"
-        message += f"• 時間: {old_time}\n"
-        message += f"• 担当: {old_reservation.get('staff', 'N/A')}\n"
-        message += f"• メニュー: {old_reservation.get('service', 'N/A')}\n"
-        message += f"→ キャンセル\n\n"
-        message += f"【新しい予約】\n"
-        message += f"• 日付: {new_reservation.get('date', 'N/A')}\n"
-        message += f"• 時間: {new_time}\n"
-        message += f"• 担当: {new_reservation.get('staff', 'N/A')}\n"
-        message += f"• メニュー: {new_reservation.get('service', 'N/A')}\n"
-        message += f"→ 登録済み"
+
+        message = f"👤: {client_name}\n\n"
+        message += f"📅: {old_reservation.get('date', 'N/A')}⇒ {new_reservation.get('date', 'N/A')}\n"
+        message += f"⏰: {old_time}⇒ {new_time}\n"
+        message += f"💇 {old_reservation.get('service', 'N/A')}⇒ {new_reservation.get('service', 'N/A')}\n"
+        message += f"🧑: {old_reservation.get('staff', 'N/A')}⇒ {new_reservation.get('staff', 'N/A')}\n\n"
+        message += f"🆔 : {reservation_data.get('reservation_id', 'N/A')}" 
         
         return self.send_notification(
             message=message,
-            title="✏️ 予約変更",
+            title="✏️予約変更",
             calendar_url=calendar_url
         )
     
