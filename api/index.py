@@ -698,7 +698,7 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
     try:
         if message_text == "同意する":
             # User agreed - send welcome message and mark as consented
-            welcome_message = f"""ご同意ありがとうございます！
+            welcome_message = f"""ご同意ありがとうございます
 
 {user_name}さん、
 すぐにご予約いただけます😊
@@ -708,7 +708,7 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
 
 その他何かご質問がございましたら、お気軽にお声かけください✨
 
-💡ご希望の日時がある場合は、早めのご予約がおすすめです。"""
+💡ご希望の日時がある場合は、早めのご予約がおすすめです"""
 
             with ApiClient(configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
