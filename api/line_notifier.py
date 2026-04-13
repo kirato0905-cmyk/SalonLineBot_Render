@@ -40,9 +40,9 @@ class LineNotifier:
         try:
             # Prepare the message
             if title:
-                full_message = f"📢 {title}\n\n{message}"
+                full_message = f"{title}\n\n{message}"
             else:
-                full_message = f"📢 {message}"
+                full_message = f"{message}"
             
             # Truncate the message if it exceeds 160 characters for template messages
             #truncated_message = full_message[:157] + "..." if len(full_message) > 160 else full_message
@@ -110,11 +110,11 @@ class LineNotifier:
     def notify_user_login(self, user_id: str, display_name: str) -> bool:
         """Send notification when user logs in"""
         message = f"👤名前: {display_name}\n\n"
-        message += f"🪪ID: `{user_id}`"
+        message += f"🆔ユーザーID: `{user_id}`"
         
         return self.send_notification(
             message=message,
-            title="💡ユーザーログイン"
+            title="💡ユーザー初回ログイン"
         )
     
     def notify_reservation_confirmation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
@@ -122,15 +122,12 @@ class LineNotifier:
         # Get staff-specific calendar URL
         staff_name = reservation_data.get('staff')
         calendar_url = self._get_calendar_url(staff_name)
-        message = f"✅ **新規予約確定**\n"
-        message += f"• 予約ID: `{reservation_data.get('reservation_id', 'N/A')}`\n"
-        message += f"• お客様: {client_name}\n"
-        message += f"• 日付: {reservation_data.get('date', 'N/A')}\n"
-        message += f"• 時間: {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
-        message += f"• サービス: {reservation_data.get('service', 'N/A')}\n"
-        message += f"• 担当者: {reservation_data.get('staff', 'N/A')}\n"
-        message += f"• 所要時間: {self._get_service_duration(reservation_data.get('service', ''))}分\n"
-        message += f"• 料金: ¥{self._get_service_price(reservation_data.get('service', '')):,}"
+        message = f"🔔新規予約確定\n\n"
+        message += f"👤: {client_name}\n"
+        message += f"📅: {reservation_data.get('date', 'N/A')}　 {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
+        message += f"💇: {reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
+        message += f"💰: ¥{self._get_service_price(reservation_data.get('service', '')):,}"
+        message += f"🆔:　`{reservation_data.get('reservation_id', 'N/A')}`" 
         
         return self.send_notification(
             message=message,
