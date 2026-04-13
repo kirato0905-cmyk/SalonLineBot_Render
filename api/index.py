@@ -657,9 +657,7 @@ def handle_consent_screen(user_id: str, user_name: str, reply_token: str):
 • 連絡先：LINE ID、表示名
 • 利用履歴：予約・変更・キャンセル記録
 
-これらの内容に同意していただける場合は、「同意する」とお送りください。
-
-同意いただけない場合は、ボットの利用を終了してください。"""
+これらの内容に同意していただける場合は、「同意する」とお送りください。"""
 
         consent_button = TemplateMessage(
             alt_text="利用規約に同意してください",
@@ -700,18 +698,20 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
     try:
         if message_text == "同意する":
             # User agreed - send welcome message and mark as consented
-            welcome_message = f"""✅ ご同意いただき、ありがとうございます！
+            welcome_message = f"""✅ ご同意ありがとうございます！
 
-{user_name}さん、サロンの予約システムをご利用いただけます。
+{user_name}さん、すぐにご予約いただけます😊
 
-以下の機能をご利用いただけます：
+👇下のメニューからお進みください
 
-📅 予約作成
-🔄 予約変更
-❌ 予約キャンセル
+📅 予約する
+🔄 予約を変更する
+❌ 予約をキャンセルする
 ❓ よくある質問
+その他何かご質問がございましたら、お気軽にお声かけください✨
 
-何かご質問がございましたら、お気軽にお声かけください。
+💡ご希望の日時がある場合は、早めのご予約がおすすめです。
+👉そのまま「予約する」からお進みください
 """
 
             with ApiClient(configuration) as api_client:
