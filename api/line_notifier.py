@@ -150,7 +150,6 @@ class LineNotifier:
         message += f"⏰: {old_time}⇒ {new_time}\n"
         message += f"💇 {old_reservation.get('service', 'N/A')}⇒ {new_reservation.get('service', 'N/A')}\n"
         message += f"🧑: {old_reservation.get('staff', 'N/A')}⇒ {new_reservation.get('staff', 'N/A')}\n\n"
-        message += f"🆔 : {reservation_data.get('reservation_id', 'N/A')}" 
         
         return self.send_notification(
             message=message,
