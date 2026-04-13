@@ -114,7 +114,7 @@ class LineNotifier:
         
         return self.send_notification(
             message=message,
-            title="ユーザーログイン"
+            title="💡ユーザーログイン"
         )
     
     def notify_reservation_confirmation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
