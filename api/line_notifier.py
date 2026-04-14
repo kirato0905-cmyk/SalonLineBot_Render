@@ -13,7 +13,7 @@ class LineNotifier:
     def __init__(self):
         load_dotenv()
         self.channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-        self.notification_user_id = os.getenv("LINE_NOTIFICATION_USER_ID")  # User ID to send notifications to
+        self.notification_user_id = os.getenv("LINE_NOTIFICATION_USER_ID")
         self.enabled = bool(self.channel_access_token and self.notification_user_id)
         
         if not self.enabled:
@@ -24,42 +24,27 @@ class LineNotifier:
     def send_notification(self, message: str, title: str = None, calendar_url: str = None) -> bool:
         """
         Send a notification to LINE
-        
-        Args:
-            message: The main message content
-            title: Optional title for the notification
-            calendar_url: Optional calendar URL for clickable button
-            
-        Returns:
-            bool: True if successful, False otherwise
         """
         if not self.enabled:
             logging.debug("LINE notifications disabled, skipping notification")
             return False
         
         try:
-            # Prepare the message
             if title:
                 full_message = f"{title}\n\n{message}"
             else:
                 full_message = f"{message}"
             
-            # Truncate the message if it exceeds 160 characters for template messages
-            #truncated_message = full_message[:157] + "..." if len(full_message) > 160 else full_message
-            
-            # If calendar_url is provided, use template message with button
             if calendar_url:
-                # Prepare template message with button
                 payload = {
                     "to": self.notification_user_id,
                     "messages": [
                         {
                             "type": "template",
-                            "altText": full_message,  # Use truncated message for altText
-                            #"altText": truncated_message,  # Use truncated message for altText
+                            "altText": full_message,
                             "template": {
                                 "type": "buttons",
-                                "text": full_message,  # Use truncated message for template text
+                                "text": full_message,
                                 "actions": [
                                     {
                                         "type": "uri",
@@ -72,7 +57,6 @@ class LineNotifier:
                     ]
                 }
             else:
-                # Use regular text message
                 payload = {
                     "to": self.notification_user_id,
                     "messages": [
@@ -83,14 +67,13 @@ class LineNotifier:
                     ]
                 }
             
-            # Send the request
             headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {self.channel_access_token}'
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.channel_access_token}"
             }
             
             response = requests.post(
-                'https://api.line.me/v2/bot/message/push',
+                "https://api.line.me/v2/bot/message/push",
                 data=json.dumps(payload),
                 headers=headers,
                 timeout=10
@@ -119,14 +102,14 @@ class LineNotifier:
     
     def notify_reservation_confirmation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
         """Send notification when reservation is confirmed"""
-        # Get staff-specific calendar URL
-        staff_name = reservation_data.get('staff')
+        staff_name = reservation_data.get("staff")
         calendar_url = self._get_calendar_url(staff_name)
+
         message = f"👤{client_name}\n"
         message += f"📅{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
         message += f"💇{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
         message += f"💰¥{self._get_service_price(reservation_data.get('service', '')):,}\n\n"
-        message += f"🆔{reservation_data.get('reservation_id', 'N/A')}" 
+        message += f"🆔{reservation_data.get('reservation_id', 'N/A')}"
         
         return self.send_notification(
             message=message,
@@ -136,13 +119,10 @@ class LineNotifier:
     
     def notify_reservation_modification(self, old_reservation: Dict[str, Any], new_reservation: Dict[str, Any], client_name: str) -> bool:
         """Send notification when reservation is modified"""
-        # Get staff-specific calendar URL (use new reservation's staff, fallback to old)
-        staff_name = new_reservation.get('staff') or old_reservation.get('staff')
+        staff_name = new_reservation.get("staff") or old_reservation.get("staff")
         calendar_url = self._get_calendar_url(staff_name)
         
-        # Format old reservation time
         old_time = f"{old_reservation.get('start_time', 'N/A')}~{old_reservation.get('end_time', 'N/A')}"
-        # Format new reservation time
         new_time = f"{new_reservation.get('start_time', 'N/A')}~{new_reservation.get('end_time', 'N/A')}"
 
         message = f"👤{client_name}\n"
@@ -156,11 +136,27 @@ class LineNotifier:
             title="✏️予約変更",
             calendar_url=calendar_url
         )
-    
-  def notify_reminder_status(self, success_count: int, total_count: int, failed_reservations: List[Dict[str, Any]]) -> bool:
-    """Reminder status notification is disabled"""
-    logging.info("Reminder manager notification is disabled.")
-    return True
+
+    def notify_reservation_cancellation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
+        """Send notification when reservation is cancelled"""
+        staff_name = reservation_data.get("staff")
+        calendar_url = self._get_calendar_url(staff_name)
+
+        message = f"👤{client_name}\n"
+        message += f"📅{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
+        message += f"💇{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n\n"
+        message += f"🆔{reservation_data.get('reservation_id', 'N/A')}"
+
+        return self.send_notification(
+            message=message,
+            title="❌予約キャンセル",
+            calendar_url=calendar_url
+        )
+
+    def notify_reminder_status(self, success_count: int, total_count: int, failed_reservations: List[Dict[str, Any]]) -> bool:
+        """Reminder status notification is disabled"""
+        logging.info("Reminder manager notification is disabled.")
+        return True
     
     def _get_service_duration(self, service_name: str) -> int:
         """Get service duration in minutes"""
