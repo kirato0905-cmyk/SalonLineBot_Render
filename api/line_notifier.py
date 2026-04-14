@@ -122,11 +122,11 @@ class LineNotifier:
         # Get staff-specific calendar URL
         staff_name = reservation_data.get('staff')
         calendar_url = self._get_calendar_url(staff_name)
-        message = f"👤:{client_name}\n"
-        message += f"📅:{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
-        message += f"💇:{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
-        message += f"💰:¥{self._get_service_price(reservation_data.get('service', '')):,}\n\n"
-        message += f"🆔:{reservation_data.get('reservation_id', 'N/A')}" 
+        message = f"👤{client_name}\n"
+        message += f"📅{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
+        message += f"💇{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
+        message += f"💰¥{self._get_service_price(reservation_data.get('service', '')):,}\n\n"
+        message += f"🆔{reservation_data.get('reservation_id', 'N/A')}" 
         
         return self.send_notification(
             message=message,
@@ -145,11 +145,11 @@ class LineNotifier:
         # Format new reservation time
         new_time = f"{new_reservation.get('start_time', 'N/A')}~{new_reservation.get('end_time', 'N/A')}"
 
-        message = f"👤:{client_name}\n"
-        message += f"📅:{old_reservation.get('date', 'N/A')}⇒ {new_reservation.get('date', 'N/A')}\n"
-        message += f"⏰:{old_time}⇒ {new_time}\n"
-        message += f"💇:{old_reservation.get('service', 'N/A')}⇒ {new_reservation.get('service', 'N/A')}\n"
-        message += f"🧑:{old_reservation.get('staff', 'N/A')}⇒ {new_reservation.get('staff', 'N/A')}"
+        message = f"👤{client_name}\n"
+        message += f"📅{old_reservation.get('date', 'N/A')}⇒ {new_reservation.get('date', 'N/A')}\n"
+        message += f"⏰{old_time}⇒ {new_time}\n"
+        message += f"💇{old_reservation.get('service', 'N/A')}⇒ {new_reservation.get('service', 'N/A')}\n"
+        message += f"🧑{old_reservation.get('staff', 'N/A')}⇒ {new_reservation.get('staff', 'N/A')}"
         
         return self.send_notification(
             message=message,
@@ -162,10 +162,10 @@ class LineNotifier:
         # Get staff-specific calendar URL
         staff_name = reservation_data.get('staff')
         calendar_url = self._get_calendar_url(staff_name)
-        message = f"👤:{client_name}\n"
-        message += f"📅:{reservation_data.get('date', 'N/A')}  {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
-        message += f"💇:{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
-        message += f"🆔:{reservation_data.get('reservation_id', 'N/A')}"
+        message = f"👤{client_name}\n"
+        message += f"📅{reservation_data.get('date', 'N/A')}  {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
+        message += f"💇{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n\n"
+        message += f"🆔{reservation_data.get('reservation_id', 'N/A')}"
         return self.send_notification(
             message=message,
             title="❌予約キャンセル",
