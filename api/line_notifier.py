@@ -162,8 +162,7 @@ class LineNotifier:
         # Get staff-specific calendar URL
         staff_name = reservation_data.get('staff')
         calendar_url = self._get_calendar_url(staff_name)
-        
-    　　message = f"👤:{client_name}\n"
+        message = f"👤:{client_name}\n"
         message += f"📅:{reservation_data.get('date', 'N/A')}  {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
         message += f"💇:{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n"
         message += f"🆔:{reservation_data.get('reservation_id', 'N/A')}"
