@@ -157,74 +157,10 @@ class LineNotifier:
             calendar_url=calendar_url
         )
     
-    def notify_reservation_cancellation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
-        """Send notification when reservation is cancelled"""
-        # Get staff-specific calendar URL
-        staff_name = reservation_data.get('staff')
-        calendar_url = self._get_calendar_url(staff_name)
-        message = f"👤{client_name}\n"
-        message += f"📅{reservation_data.get('date', 'N/A')}  {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
-        message += f"💇{reservation_data.get('service', 'N/A')}（ {reservation_data.get('staff', 'N/A')}）\n\n"
-        message += f"🆔{reservation_data.get('reservation_id', 'N/A')}"
-        return self.send_notification(
-            message=message,
-            title="❌予約キャンセル",
-            calendar_url=calendar_url
-        )
-    
-    def notify_reminder_status(self, success_count: int, total_count: int, failed_reservations: List[Dict[str, Any]]) -> bool:
-        """Send notification about reminder status to manager"""
-        if total_count == 0:
-            # No reminders to send
-            message = f"リマインダー送信はありません"
-            
-            title = "📅 リマインダー送信"
-            
-        elif success_count == total_count and total_count > 0:
-            # All reminders sent successfully
-            message = f"✅ **予約リマインダー送信完了**\n\n"
-            message += f"📊 **送信結果:**\n"
-            message += f"• 送信成功: {success_count}件\n"
-            message += f"• 送信失敗: 0件\n"
-            message += f"• 合計: {total_count}件\n\n"
-            message += f"すべてのリマインダーが正常に送信されました。"
-            
-            title = "📅 リマインダー送信完了"
-            
-        elif success_count > 0:
-            # Some reminders sent successfully
-            message = f"⚠️ **予約リマインダー送信結果**\n\n"
-            message += f"📊 **送信結果:**\n"
-            message += f"• 送信成功: {success_count}件\n"
-            message += f"• 送信失敗: {total_count - success_count}件\n"
-            message += f"• 合計: {total_count}件\n\n"
-            
-            if failed_reservations:
-                message += f"🚫 **送信失敗した予約:**\n"
-                for res in failed_reservations[:5]:  # Show first 5 failures
-                    message += f"• {res.get('client_name', 'N/A')} - {res.get('date', 'N/A')} {res.get('start_time', 'N/A')}\n"
-                
-                if len(failed_reservations) > 5:
-                    message += f"• ...他 {len(failed_reservations) - 5}件\n"
-            
-            title = "⚠️ リマインダー送信結果"
-            
-        else:
-            # No reminders sent (total_count > 0 but success_count == 0)
-            message = f"❌ **予約リマインダー送信失敗**\n\n"
-            message += f"📊 **送信結果:**\n"
-            message += f"• 送信成功: 0件\n"
-            message += f"• 送信失敗: {total_count}件\n"
-            message += f"• 合計: {total_count}件\n\n"
-            message += f"すべてのリマインダー送信に失敗しました。\n"
-            message += f"システム管理者にご連絡ください。"
-            
-            title = "❌ リマインダー送信失敗"
-        
-        return self.send_notification(
-            message=message,
-            title=title
-        )
+  def notify_reminder_status(self, success_count: int, total_count: int, failed_reservations: List[Dict[str, Any]]) -> bool:
+    """Reminder status notification is disabled"""
+    logging.info("Reminder manager notification is disabled.")
+    return True
     
     def _get_service_duration(self, service_name: str) -> int:
         """Get service duration in minutes"""
