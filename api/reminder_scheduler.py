@@ -1,16 +1,13 @@
 """
 Scheduler for running daily reminder tasks
 Runs at configured time daily to send reservation reminders
-Compatible with new KB format:
-[
-  {
-    "id": "remind_time",
-    "カテゴリ": "設定",
-    "キー": ["REMIND_TIME", "リマインド時刻"],
-    "値": "来店前日 09:00 自動配信"
-  }
-]
+
+Priority:
+1. settings.json
+2. information_kb.json
+3. default fallback (09:00)
 """
+
 import os
 import time
 import json
@@ -33,33 +30,79 @@ class ReminderScheduler:
         else:
             print("Reminder scheduler disabled")
 
-    def _load_kb_data(self) -> dict:
-        """Load kb.json in new KB format and flatten keys into a simple dict."""
+    def _candidate_paths(self, filename: str) -> list[str]:
+        base_dirs = [
+            os.path.dirname(os.path.abspath(__file__)),
+            os.getcwd(),
+            os.path.join(os.getcwd(), "api"),
+        ]
+
+        paths = []
+        for base_dir in base_dirs:
+            paths.append(os.path.join(base_dir, "data", filename))
+            paths.append(os.path.join(base_dir, "api", "data", filename))
+        return paths
+
+    def _load_settings_data(self) -> dict:
+        """
+        settings.json を読む。
+        例:
+        {
+          "remind_time": "来店前日 09:00 自動配信"
+        }
+        """
         try:
-            possible_paths = []
+            possible_paths = self._candidate_paths("settings.json")
 
-            base_dirs = [
-                os.path.dirname(os.path.abspath(__file__)),
-                os.getcwd(),
-                os.path.join(os.getcwd(), "api"),
-            ]
-
-            for base_dir in base_dirs:
-                possible_paths.append(os.path.join(base_dir, "data", "kb.json"))
-                possible_paths.append(os.path.join(base_dir, "api", "data", "kb.json"))
-                possible_paths.append(os.path.join(base_dir, "data", "KB.json"))
-                possible_paths.append(os.path.join(base_dir, "api", "data", "KB.json"))
-
-            for kb_file in possible_paths:
+            for file_path in possible_paths:
                 try:
-                    if not os.path.exists(kb_file) or not os.path.isfile(kb_file):
+                    if not os.path.exists(file_path) or not os.path.isfile(file_path):
                         continue
 
-                    with open(kb_file, "r", encoding="utf-8") as f:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+
+                    if not isinstance(data, dict):
+                        logging.warning(f"settings.json is not a dict: {file_path}")
+                        continue
+
+                    logging.info(f"Loaded settings from {file_path}")
+                    return data
+
+                except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
+                    logging.warning(f"Failed to read settings file {file_path}: {e}")
+                    continue
+
+            return {}
+
+        except Exception as e:
+            logging.error(f"Error loading settings.json: {e}", exc_info=True)
+            return {}
+
+    def _load_information_kb_data(self) -> dict:
+        """
+        information_kb.json を読んで flatten する。
+        例:
+        {
+          "id": "remind_time",
+          "カテゴリ": "設定",
+          "キー": ["REMIND_TIME", "リマインド時刻"],
+          "値": "来店前日 09:00 自動配信"
+        }
+        """
+        try:
+            possible_paths = self._candidate_paths("information_kb.json")
+
+            for file_path in possible_paths:
+                try:
+                    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                        continue
+
+                    with open(file_path, "r", encoding="utf-8") as f:
                         kb_data = json.load(f)
 
                     if not isinstance(kb_data, list):
-                        logging.warning(f"KB file is not a list: {kb_file}")
+                        logging.warning(f"information_kb.json is not a list: {file_path}")
                         continue
 
                     kb_dict = {}
@@ -85,25 +128,30 @@ class ReminderScheduler:
                             if key:
                                 kb_dict[key] = value
 
-                    logging.info(f"Loaded KB data from {kb_file} ({len(kb_dict)} flattened keys)")
+                    logging.info(
+                        f"Loaded information KB from {file_path} ({len(kb_dict)} flattened keys)"
+                    )
                     return kb_dict
 
                 except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
-                    logging.warning(f"Failed to read KB file {kb_file}: {e}")
+                    logging.warning(f"Failed to read information_kb file {file_path}: {e}")
                     continue
 
-            logging.warning(f"Could not find kb.json. Tried paths: {possible_paths}")
             return {}
 
         except Exception as e:
-            logging.error(f"Error loading kb.json: {e}", exc_info=True)
+            logging.error(f"Error loading information_kb.json: {e}", exc_info=True)
             return {}
 
     def _get_remind_time_text(self) -> str:
-        """Get reminder time text from KB, with safe fallback."""
-        kb_data = self._load_kb_data()
+        """Get reminder time text from settings.json or information_kb.json, with fallback."""
+        settings_data = self._load_settings_data()
+        if settings_data:
+            remind_time = str(settings_data.get("remind_time", "")).strip()
+            if remind_time:
+                return remind_time
 
-        # 優先順位: REMIND_TIME -> リマインド時刻 -> デフォルト
+        kb_data = self._load_information_kb_data()
         remind_time = (
             kb_data.get("REMIND_TIME")
             or kb_data.get("リマインド時刻")
@@ -126,8 +174,7 @@ class ReminderScheduler:
 
         if not time_match:
             logging.warning(
-                f"Could not parse time from remind_time='{remind_time_text}'. "
-                f"Using default 09:00."
+                f"Could not parse time from remind_time='{remind_time_text}'. Using default 09:00."
             )
             return 9, 0
 
@@ -136,8 +183,7 @@ class ReminderScheduler:
 
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             logging.warning(
-                f"Parsed invalid time from remind_time='{remind_time_text}'. "
-                f"Using default 09:00."
+                f"Parsed invalid time from remind_time='{remind_time_text}'. Using default 09:00."
             )
             return 9, 0
 
@@ -158,7 +204,7 @@ class ReminderScheduler:
         print(
             f"Reminder schedule configured: Daily at "
             f"{scheduled_hour:02d}:{scheduled_minute:02d} Tokyo time "
-            f"(from kb.json: {remind_time_text})"
+            f"(source value: {remind_time_text})"
         )
 
     def _run_reminders(self):
