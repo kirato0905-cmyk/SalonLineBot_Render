@@ -304,7 +304,7 @@ def handle_message(event: MessageEvent):
                         
                         if kb_facts:
                             # Step 2: Use KB facts with ChatGPT for natural language response
-                            reply = chatgpt_faq.get_response(message_text, kb_facts)
+                            reply = chatgpt_faq.get_response(message_text, kb_facts["kb_facts"])
                             
                             # Log successful KB hit
                             print(f"KB hit for user {user_id}: {message_text} -> {kb_facts.get('category', 'unknown')}")
