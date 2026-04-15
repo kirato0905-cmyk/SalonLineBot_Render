@@ -1,8 +1,6 @@
 import os
 import logging
-import time
 import threading
-import json
 from urllib.parse import parse_qs
 from fastapi import FastAPI, Request, Header, HTTPException
 from dotenv import load_dotenv
@@ -13,7 +11,6 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent, P
 from api.rag_faq import RAGFAQ
 from api.chatgpt_faq import ChatGPTFAQ
 from api.reservation_flow import ReservationFlow
-from api.google_sheets_logger import GoogleSheetsLogger
 from api.reminder_scheduler import reminder_scheduler
 from api.faq_menu import send_faq_menu, send_faq_answer, send_faq_answer_by_item, get_faq_by_number
 from api.service_menu import send_service_menu
@@ -35,7 +32,6 @@ try:
     rag_faq = RAGFAQ()
     chatgpt_faq = ChatGPTFAQ()
     reservation_flow = ReservationFlow()
-    sheets_logger = GoogleSheetsLogger()
     
     # Set LINE configuration for reservation flow
     reservation_flow.set_line_configuration(configuration)
@@ -47,7 +43,6 @@ except Exception as e:
     rag_faq = None
     chatgpt_faq = None
     reservation_flow = None
-    sheets_logger = None
 
 app = FastAPI()
 
@@ -120,14 +115,10 @@ async def callback(request: Request, x_line_signature: str = Header(None)):
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event: MessageEvent):
-    start_time = time.time()
     message_text = event.message.text.strip()
     user_id = event.source.user_id
     reply = ""
     quick_reply_items = []
-    kb_category = None
-    action_type = "message"
-    reservation_data = None
     user_name = ""
     
     # Get user display name
@@ -198,17 +189,7 @@ def handle_message(event: MessageEvent):
         if message_text in service_menu_keywords:
             try:
                 send_service_menu(event.reply_token, configuration)
-                action_type = "service_menu"
-                if sheets_logger:
-                    sheets_logger.log_message(
-                        user_id=user_id,
-                        user_message=message_text,
-                        bot_response="Service menu displayed",
-                        user_name=user_name,
-                        message_type="flex",
-                        action_type=action_type,
-                        processing_time=(time.time() - start_time) * 1000
-                    )
+               
                 return
             except Exception as e:
                 logging.error(f"Failed to send service menu: {e}", exc_info=True)
@@ -225,17 +206,7 @@ def handle_message(event: MessageEvent):
         if message_text == "スタッフ紹介":
             try:
                 send_staff_intro(event.reply_token, configuration)
-                action_type = "staff_intro"
-                if sheets_logger:
-                    sheets_logger.log_message(
-                        user_id=user_id,
-                        user_message=message_text,
-                        bot_response="Staff intro displayed",
-                        user_name=user_name,
-                        message_type="flex",
-                        action_type=action_type,
-                        processing_time=(time.time() - start_time) * 1000,
-                    )
+               
                 return
             except Exception as e:
                 logging.error(f"Failed to send staff intro: {e}", exc_info=True)
@@ -253,19 +224,9 @@ def handle_message(event: MessageEvent):
             try:
                 print(f"User {user_id} requested FAQ menu")
                 send_faq_menu(event.reply_token, configuration)
-                action_type = "faq_menu"
                 print(f"FAQ menu sent successfully to user {user_id}")
                 # Log FAQ menu access
-                if sheets_logger:
-                    sheets_logger.log_message(
-                        user_id=user_id,
-                        user_message=message_text,
-                        bot_response="FAQ menu displayed",
-                        user_name=user_name,
-                        message_type="text",
-                        action_type=action_type,
-                        processing_time=(time.time() - start_time) * 1000
-                    )
+               
                 return
             except Exception as e:
                 logging.error(f"Failed to send FAQ menu: {e}", exc_info=True)
@@ -287,18 +248,8 @@ def handle_message(event: MessageEvent):
                 faq_item = get_faq_by_number(message_text)
                 if faq_item and "answer" in faq_item:
                     send_faq_answer_by_item(event.reply_token, faq_item, configuration)
-                    action_type = "faq_answer"
                     print(f"FAQ answer sent successfully for {message_text} to user {user_id}")
-                    if sheets_logger:
-                        sheets_logger.log_message(
-                            user_id=user_id,
-                            user_message=message_text,
-                            bot_response=f"FAQ answer for: {faq_item['question']}",
-                            user_name=user_name,
-                            message_type="text",
-                            action_type=action_type,
-                            processing_time=(time.time() - start_time) * 1000
-                        )
+                  
                     return
                 else:
                     with ApiClient(configuration) as api_client:
@@ -326,7 +277,6 @@ def handle_message(event: MessageEvent):
         # Special ping-pong test
         if message_text == "ping":
             reply = "pong"
-            action_type = "ping"
         else:
             # 1. Try reservation flow first (highest priority)
             if reservation_flow:
@@ -345,10 +295,7 @@ def handle_message(event: MessageEvent):
                     else:
                         reply = reservation_reply
                         quick_reply_items = []
-                    action_type = "reservation"
-                    # Try to get reservation data if available
-                    if hasattr(reservation_flow, 'user_states') and user_id in reservation_flow.user_states:
-                        reservation_data = reservation_flow.user_states[user_id].get('data', {})
+                  
                 else:
                     # 2. Integrated RAG-FAQ + ChatGPT workflow
                     if rag_faq and chatgpt_faq:
@@ -358,26 +305,21 @@ def handle_message(event: MessageEvent):
                         if kb_facts:
                             # Step 2: Use KB facts with ChatGPT for natural language response
                             reply = chatgpt_faq.get_response(message_text, kb_facts)
-                            kb_category = kb_facts.get('category', 'unknown')
-                            action_type = "faq"
                             
                             # Log successful KB hit
-                            print(f"KB hit for user {user_id}: {message_text} -> {kb_category}")
+                            print(f"KB hit for user {user_id}: {message_text} -> {kb_facts.get('category', 'unknown')}")
                         else:
                             # Step 3: No KB facts found - return standard "分かりません" response
                             reply = "申し訳ございませんが、その質問については分かりません。直接お電話にてお問い合わせください。"
-                            action_type = "unknown"
                             
                             # Log KB miss for future enhancement
                             logging.warning(f"KB miss for user {user_id}: {message_text}")
                     else:
                         # Fallback when AI modules are not available
                         reply = "申し訳ございませんが、現在システムの初期化中です。しばらくお待ちください。"
-                        action_type = "system_error"
             else:
                 # Fallback when reservation flow is not available
                 reply = "申し訳ございませんが、現在システムの初期化中です。しばらくお待ちください。"
-                action_type = "system_error"
 
         # Reply (with optional Quick Reply; support postback for service selection)
         try:
@@ -397,95 +339,39 @@ def handle_message(event: MessageEvent):
                         messages=[text_message]
                     )
                 )
+                
+            # 予約確定後は状態をクリア
+            if (
+                reservation_flow and
+                hasattr(reservation_flow, 'user_states') and
+                user_id in reservation_flow.user_states and
+                reservation_flow.user_states[user_id].get('step') == 'confirmation' and
+                any(keyword in message_text for keyword in ['はい', '確定', 'お願い'])
+            ):
+                del reservation_flow.user_states[user_id]
+                print(f"Cleared user state for {user_id} after reservation confirmation")
+                
         except Exception as e:
             logging.error(f"LINE reply error: {e}")
             # Log error to sheets
-            if sheets_logger:
-                sheets_logger.log_error(
-                    user_id=user_id,
-                    error_message=str(e),
-                    user_name=user_name,
-                    user_message=message_text,
-                    bot_response="Error occurred"
-                )
+           
             return
 
     except Exception as e:
         logging.error(f"Message handling error: {e}")
         reply = "申し訳ございませんが、エラーが発生しました。"
-        action_type = "error"
         # Log error to sheets
-        if sheets_logger:
-            sheets_logger.log_error(
-                user_id=user_id,
-                error_message=str(e),
-                user_name=user_name,
-                user_message=message_text,
-                bot_response=reply
-            )
+     
         return
-
-    # Log successful interaction to Google Sheets
-    processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-    
-    # Debug logging
-    print(f"Attempting to log interaction - sheets_logger: {sheets_logger is not None}, action_type: {action_type}")
-    
-    if sheets_logger:
-        if action_type == "reservation":
-            print(f"Logging reservation action for user {user_id}")
-            sheets_logger.log_reservation_action(
-                user_id=user_id,
-                action=action_type,
-                user_name=user_name,
-                reservation_data=reservation_data,
-                user_message=message_text,
-                bot_response=reply
-            )
-            
-            # Clear user state after logging for completed reservations
-            if (reservation_flow and 
-                hasattr(reservation_flow, 'user_states') and 
-                user_id in reservation_flow.user_states and
-                reservation_flow.user_states[user_id].get('step') == 'confirmation' and
-                any(keyword in message_text for keyword in ['はい', '確定', 'お願い'])):
-                del reservation_flow.user_states[user_id]
-                print(f"Cleared user state for {user_id} after reservation confirmation")
-                
-        elif action_type == "faq":
-            print(f"Logging FAQ interaction for user {user_id}")
-            sheets_logger.log_faq_interaction(
-                user_id=user_id,
-                user_message=message_text,
-                bot_response=reply,
-                user_name=user_name,
-                kb_category=kb_category,
-                processing_time=processing_time
-            )
-        else:
-            print(f"Logging general message for user {user_id}")
-            sheets_logger.log_message(
-                user_id=user_id,
-                user_message=message_text,
-                bot_response=reply,
-                user_name=user_name,
-                message_type="text",
-                action_type=action_type,
-                processing_time=processing_time
-            )
-    else:
-        logging.warning(f"Sheets logger is None - cannot log interaction for user {user_id}")
 
 @handler.add(PostbackEvent)
 def handle_postback(event: PostbackEvent):
     """Handle postback events such as Flex button taps."""
-    start_time = time.time()
     user_id = event.source.user_id
     postback_data = event.postback.data or ""
     params = parse_qs(postback_data)
     action = params.get("action", [None])[0]
     reply_text = ""
-    action_type = "postback"
 
     # Fetch user display name for logging
     try:
@@ -501,14 +387,11 @@ def handle_postback(event: PostbackEvent):
         if reservation_flow:
             try:
                 reply_text = reservation_flow.start_reservation_with_service(user_id, service_id)
-                action_type = "reservation"
             except Exception as e:
                 logging.error(f"Failed to start reservation from postback: {e}", exc_info=True)
                 reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
-                action_type = "error"
         else:
             reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
-            action_type = "system_error"
     else:
         reply_text = "選択内容を処理できませんでした。"
 
@@ -540,31 +423,8 @@ def handle_postback(event: PostbackEvent):
             )
     except Exception as e:
         logging.error(f"LINE reply error (postback): {e}")
-        if sheets_logger:
-            sheets_logger.log_error(
-                user_id=user_id,
-                error_message=str(e),
-                user_name=user_name,
-                user_message=f"[postback] {postback_data}",
-                bot_response="Error occurred"
-            )
+      
         return
-
-    # Log interaction
-    processing_time = (time.time() - start_time) * 1000
-    if sheets_logger:
-        sheets_logger.log_message(
-            user_id=user_id,
-            user_message=f"[postback] {postback_data}",
-            bot_response=reply_body,
-            user_name=user_name,
-            message_type="postback",
-            action_type=action_type,
-            processing_time=processing_time
-        )
-    else:
-        logging.warning(f"Sheets logger is None - cannot log postback for user {user_id}")
-
 
 @handler.add(FollowEvent)
 def handle_follow(event: FollowEvent):
