@@ -2570,20 +2570,6 @@ class ReservationFlow:
                 if not calendar_success:
                     print(f"Warning: Failed to cancel calendar event for reservation {reservation_id}")
                 
-                # Log the cancellation action
-                try:
-                    sheets_logger.log_message(
-                        user_id=user_id,
-                        user_name=client_name,
-                        message_type="user_message",
-                        user_message="再予約による自動キャンセル",
-                        bot_response="予約をキャンセルして新しい予約フローを開始",
-                        action_type="cancellation",
-                        reservation_data=reservation
-                    )
-                except Exception as log_error:
-                    print(f"Warning: Failed to log cancellation action: {log_error}")
-                
                 # Send notification to manager about cancellation
                 try:
                     cancellation_reservation_data = {
