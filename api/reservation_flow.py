@@ -723,7 +723,9 @@ class ReservationFlow:
         user_id: str,
         service_identifier: str,
     ) -> Union[str, Dict[str, Any]]:
-        """Start reservation with service_id from postback only."""
+        """Start reservation with service_id from postback only.
+        Preserve modification context when called from re-reservation flow.
+        """
         if not service_identifier or not str(service_identifier).strip():
             text = "もう一度メニューをお選びください。"
             return self._quick_reply_return(
@@ -742,14 +744,22 @@ class ReservationFlow:
                 include_cancel=True,
             )
 
-        self.user_states[user_id] = {
-            "step": "service_selection",
-            "data": {"user_id": user_id, "service_id": service_id},
-        }
+        existing_state = self.user_states.get(user_id, {})
+        existing_data = existing_state.get("data", {})
+        existing_data["user_id"] = user_id
+        existing_data["service_id"] = service_id
+
+        existing_state["step"] = "service_selection"
+        existing_state["data"] = existing_data
+
+        self.user_states[user_id] = existing_state
+
         return self._reply_after_service_selected(user_id)
 
     def start_reservation_with_staff(self, user_id: str, staff_identifier: str) -> Union[str, Dict[str, Any]]:
-        """Start a reservation flow with a preselected staff."""
+        """Start a reservation flow with a preselected staff.
+        Preserve modification context when needed.
+        """
         staff_name = None
 
         if staff_identifier in self.staff_members:
@@ -763,13 +773,16 @@ class ReservationFlow:
         if not staff_name:
             return "申し訳ございませんが、選択されたスタッフは現在ご指定いただけません。"
 
-        self.user_states[user_id] = {
-            "step": "service_selection",
-            "data": {
-                "user_id": user_id,
-                "staff": staff_name,
-            },
-        }
+        existing_state = self.user_states.get(user_id, {})
+        existing_data = existing_state.get("data", {})
+
+        existing_data["user_id"] = user_id
+        existing_data["staff"] = staff_name
+
+        existing_state["step"] = "service_selection"
+        existing_state["data"] = existing_data
+
+        self.user_states[user_id] = existing_state
 
         return self._start_reservation(user_id)
 
@@ -1068,21 +1081,6 @@ class ReservationFlow:
             hours_until_booking = time_difference.total_seconds() / 3600
 
             if hours_until_booking < 1.99:
-                needed_hours = 2 - hours_until_booking
-                needed_minutes = int(needed_hours * 60)
-
-                if needed_minutes <= 0:
-                    time_message = "数分"
-                elif needed_minutes < 60:
-                    time_message = f"{needed_minutes}分"
-                else:
-                    hours = needed_minutes // 60
-                    minutes = needed_minutes % 60
-                    if minutes == 0:
-                        time_message = f"{hours}時間"
-                    else:
-                        time_message = f"{hours}時間{minutes}分"
-
                 error_message = """申し訳ございませんが、ご予約は来店の2時間前までにお取りください。
 2時間以上先の時間帯をご選択ください。"""
                 return False, error_message
@@ -1227,17 +1225,9 @@ class ReservationFlow:
             period_start = period["time"]
             period_end = period["end_time"]
 
-            print(f"[Time Validation] Checking period: {period_start} - {period_end}")
-            print(f"  start_time: {start_time}, end_time: {end_time}")
-            print(f"  period_start <= start_time: {period_start} <= {start_time} = {period_start <= start_time}")
-            print(f"  end_time <= period_end: {end_time} <= {period_end} = {end_time <= period_end}")
-
             if period_start <= start_time and end_time <= period_end:
                 is_valid_range = True
-                print("  ✅ VALID: Time range fits in this period")
                 break
-            else:
-                print("  ❌ INVALID: Time range doesn't fit in this period")
 
         if not is_valid_range:
             period_strings = [f"・{period['time']}~{period['end_time']}" for period in available_periods]
@@ -1256,8 +1246,6 @@ class ReservationFlow:
             end_time,
             user_id,
         )
-        print("[Time Validation] User ID:", user_id)
-        print("[Time Validation] User time conflict:", user_time_conflict)
 
         if user_time_conflict:
             self.user_states[user_id]["step"] = "time_selection"
@@ -1301,9 +1289,11 @@ class ReservationFlow:
         """Handle final confirmation"""
         yes_keywords = self.confirmation_keywords.get("yes", [])
         if any(keyword in message for keyword in yes_keywords):
+            print("[CONFIRM DEBUG] full_state =", self.user_states.get(user_id))
+            print("[CONFIRM DEBUG] is_modification =", self.user_states.get(user_id, {}).get("is_modification"))
+            print("[CONFIRM DEBUG] original_reservation =", self.user_states.get(user_id, {}).get("original_reservation"))
+
             reservation_data = self.user_states[user_id]["data"].copy()
-            print(f"[_handle_confirmation] reservation_data: {reservation_data}")
-            print(f"[_handle_confirmation] staff in reservation_data: {reservation_data.get('staff')}")
 
             if "staff" not in reservation_data or not reservation_data.get("staff"):
                 logging.error(
@@ -1332,7 +1322,6 @@ class ReservationFlow:
 
             client_name = self._get_line_display_name(user_id)
 
-            print(f"[_handle_confirmation] Calling create_reservation_event with staff: {reservation_data.get('staff')}")
             calendar_success = self.google_calendar.create_reservation_event(
                 reservation_data,
                 client_name,
@@ -1343,7 +1332,6 @@ class ReservationFlow:
                     f"[_handle_confirmation] Failed to create calendar event for user {user_id}, reservation {reservation_id}"
                 )
 
-            sheets_success = False
             try:
                 from api.google_sheets_logger import GoogleSheetsLogger
 
@@ -1363,9 +1351,7 @@ class ReservationFlow:
                 }
 
                 sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
-                if sheets_success:
-                    print(f"Successfully saved reservation {reservation_id} to Reservations sheet")
-                else:
+                if not sheets_success:
                     logging.error(f"Failed to save reservation {reservation_id} to Reservations sheet")
 
             except Exception as e:
@@ -1383,27 +1369,18 @@ class ReservationFlow:
                     original_reservation_id = original_reservation["reservation_id"]
                     original_staff_name = original_reservation.get("staff")
 
-                    print(
-                        f"[Modification] Cancelling original reservation: {original_reservation_id}, "
-                        f"Staff: {original_staff_name}"
-                    )
-
                     sheets_success = sheets_logger.update_reservation_status(
                         original_reservation_id,
                         "Cancelled",
                     )
-                    if sheets_success:
-                        print(f"[Modification] Successfully updated Google Sheets status to Cancelled for {original_reservation_id}")
-                    else:
+                    if not sheets_success:
                         logging.warning(f"[Modification] Failed to update Google Sheets status for {original_reservation_id}")
 
                     calendar_success = self.google_calendar.cancel_reservation_by_id(
                         original_reservation_id,
                         original_staff_name,
                     )
-                    if calendar_success:
-                        print(f"[Modification] Successfully deleted original reservation {original_reservation_id} from Google Calendar")
-                    else:
+                    if not calendar_success:
                         logging.warning(f"[Modification] Failed to delete original reservation {original_reservation_id} from Google Calendar")
 
                 except Exception as e:
@@ -1419,18 +1396,14 @@ class ReservationFlow:
                 )
 
                 if is_modification and original_reservation:
-                    print(f"[Notification] Sending modification notification for user {user_id}")
                     notification_success = send_reservation_modification_notification(
                         original_reservation,
                         reservation_data,
                         client_name,
                     )
-                    if notification_success:
-                        print("[Notification] Modification notification sent successfully")
-                    else:
+                    if not notification_success:
                         logging.warning(f"[Notification] Modification notification failed for user {user_id}")
                 else:
-                    print(f"[Notification] Sending confirmation notification for user {user_id}")
                     send_reservation_confirmation_notification(reservation_data, client_name)
 
             except Exception as e:
@@ -1495,10 +1468,6 @@ class ReservationFlow:
                         original_reservation = state["original_reservation"]
                         if original_reservation.get("date") == date_str:
                             exclude_reservation_id = original_reservation.get("reservation_id")
-                            print(
-                                f"[Final Availability] Modification flow detected. "
-                                f"Excluding original reservation {exclude_reservation_id} from conflict checks."
-                            )
             except Exception as e:
                 logging.error(f"Error detecting modification context in _check_final_availability: {e}")
 
@@ -2039,8 +2008,6 @@ class ReservationFlow:
 
             if re.match(r"^RES-\d{8}-\d{4}$", message):
                 reservation_id = message.strip()
-                print(f"Looking for reservation ID: {reservation_id}")
-                print(f"Available reservations: {[res['reservation_id'] for res in reservations]}")
 
                 for res in reservations:
                     if res["reservation_id"] == reservation_id:
@@ -2226,6 +2193,11 @@ def print_user_status(rf, user_id):
         print("Reservation Data:")
         for key, value in data.items():
             print(f"  • {key}: {value}")
+
+        if "is_modification" in state:
+            print(f"  • is_modification: {state.get('is_modification')}")
+        if "original_reservation" in state:
+            print(f"  • original_reservation: {state.get('original_reservation')}")
     else:
         print("No active session")
 
