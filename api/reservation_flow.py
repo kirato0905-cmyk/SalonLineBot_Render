@@ -11,6 +11,8 @@ Added:
   - Re-reservation flow from modification
   - Reservation flow via menu introduction
   - Reservation flow via staff introduction
+- Safe handling for modification/cancellation when user has no reservations:
+  do not enter modify/cancel state until a valid reservation list exists
 """
 
 import re
@@ -1619,14 +1621,10 @@ class ReservationFlow:
                 del self.user_states[user_id]
             return "予約変更をキャンセルいたします。またのご利用をお待ちしております。"
 
-        if not state or state.get("step") != "modify_select_reservation":
-            self.user_states[user_id] = {"step": "modify_select_reservation"}
-            return self._show_user_reservations_for_modification(user_id)
-
-        if state.get("step") == "modify_select_reservation":
+        if state and state.get("step") == "modify_select_reservation":
             return self._handle_modify_reservation_selection(user_id, message)
 
-        return "エラーが発生しました。もう一度お試しください。"
+        return self._show_user_reservations_for_modification(user_id)
 
     def _show_user_reservations_for_modification(self, user_id: str) -> Union[str, Dict[str, Any]]:
         try:
@@ -1639,7 +1637,9 @@ class ReservationFlow:
             reservations = sheets_logger.get_user_reservations(client_name)
 
             if not reservations:
-                return "申し訳ございませんが、あなたの予約が見つかりませんでした。"
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return "申し訳ございませんが、あなたの予約が見つかりませんでした。\n新しくご予約される場合は「予約したい」とお送りください。"
 
             tokyo_tz = pytz.timezone("Asia/Tokyo")
             current_time = datetime.now(tokyo_tz)
@@ -1670,9 +1670,14 @@ class ReservationFlow:
                     continue
 
             if not future_reservations:
-                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。"
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。\n新しくご予約される場合は「予約したい」とお送りください。"
 
-            self.user_states[user_id]["user_reservations"] = future_reservations
+            self.user_states[user_id] = {
+                "step": "modify_select_reservation",
+                "user_reservations": future_reservations,
+            }
 
             reservation_list = []
             quick_reply_items = []
@@ -1702,6 +1707,8 @@ class ReservationFlow:
 
         except Exception as e:
             logging.error(f"Failed to show user reservations for modification: {e}")
+            if user_id in self.user_states:
+                del self.user_states[user_id]
             return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
 
     def _handle_modify_reservation_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
@@ -1839,17 +1846,13 @@ class ReservationFlow:
                     del self.user_states[user_id]
                 return "予約取り消しをキャンセルいたします。またのご利用をお待ちしております。"
 
-        if not state or state.get("step") not in ["cancel_select_reservation", "cancel_confirm"]:
-            self.user_states[user_id] = {"step": "cancel_select_reservation"}
-            return self._show_user_reservations_for_cancellation(user_id)
-
-        elif state.get("step") == "cancel_select_reservation":
+        if state and state.get("step") == "cancel_select_reservation":
             return self._handle_cancel_reservation_selection(user_id, message)
 
-        elif state.get("step") == "cancel_confirm":
+        if state and state.get("step") == "cancel_confirm":
             return self._handle_cancel_confirmation(user_id, message)
 
-        return "エラーが発生しました。もう一度お試しください。"
+        return self._show_user_reservations_for_cancellation(user_id)
 
     def _show_user_reservations_for_cancellation(self, user_id: str) -> Union[str, Dict[str, Any]]:
         try:
@@ -1862,7 +1865,9 @@ class ReservationFlow:
             reservations = sheets_logger.get_user_reservations(client_name)
 
             if not reservations:
-                return "申し訳ございませんが、あなたの予約が見つかりませんでした。"
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return "申し訳ございませんが、あなたの予約が見つかりませんでした。\n新しくご予約される場合は「予約したい」とお送りください。"
 
             tokyo_tz = pytz.timezone("Asia/Tokyo")
             current_time = datetime.now(tokyo_tz)
@@ -1893,9 +1898,14 @@ class ReservationFlow:
                     continue
 
             if not future_reservations:
-                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。\n過去の予約はキャンセルできません。"
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。\n過去の予約はキャンセルできません。\n新しくご予約される場合は「予約したい」とお送りください。"
 
-            self.user_states[user_id]["user_reservations"] = future_reservations
+            self.user_states[user_id] = {
+                "step": "cancel_select_reservation",
+                "user_reservations": future_reservations,
+            }
 
             reservation_list = []
             quick_reply_items = []
@@ -1919,6 +1929,8 @@ class ReservationFlow:
 
         except Exception as e:
             logging.error(f"Failed to show user reservations for cancellation: {e}")
+            if user_id in self.user_states:
+                del self.user_states[user_id]
             return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
 
     def _handle_cancel_reservation_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
