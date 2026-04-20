@@ -1,14 +1,22 @@
 """
-ChatGPT-powered FAQ system for natural language responses using KB facts
+ChatGPT-powered FAQ system for natural language responses using unified KB facts
+Supports:
+- unified_kb.json via UnifiedKBLoader
+- RAGFAQ.get_kb_facts() output
+- legacy KB format [{"id": "...", "カテゴリ": "...", "キー": [...], "値": "..."}]
 """
+
 import os
 from typing import Optional, Any, List, Dict
-from openai import OpenAI
+
 from dotenv import load_dotenv
+from openai import OpenAI
+
+from unified_kb_loader import UnifiedKBLoader
 
 
 class ChatGPTFAQ:
-    def __init__(self):
+    def __init__(self, unified_kb_path: str = "api/data/unified_kb.json"):
         load_dotenv()
 
         api_key = os.getenv("OPENAI_API_KEY")
@@ -21,6 +29,8 @@ class ChatGPTFAQ:
             self.client = None
             self.api_available = False
             print("Warning: OPENAI_API_KEY not set. ChatGPT features will use fallback responses.")
+
+        self.loader = UnifiedKBLoader(unified_kb_path)
 
         self.system_prompt = """あなたは美容室のトップスタイリスト兼セールス担当です。
 目的は「お客様の不安を解消し、自然に予約につなげてお店の売り上げをアップさせること」です。
@@ -75,7 +85,14 @@ class ChatGPTFAQ:
 
     def get_response(self, user_message: str, kb_facts: Optional[Any] = None) -> str:
         """
-        Get ChatGPT-powered natural language response using KB facts
+        Get ChatGPT-powered natural language response using KB facts.
+
+        Supported kb_facts input:
+        1. RAGFAQ.get_kb_facts() return value
+        2. unified entry list
+        3. legacy KB list [{"id": "...", "カテゴリ": "...", "キー": [...], "値": "..."}]
+        4. dict format {"kb_facts": [...]}
+        5. simple dict {"料金": "...", "営業時間": "..."}
         """
         try:
             if self._is_dangerous_query(user_message):
@@ -83,11 +100,9 @@ class ChatGPTFAQ:
 
             normalized_facts = self._normalize_kb_facts(kb_facts)
 
-            # KBが無いならAPIを呼ばない
             if not normalized_facts:
                 return "申し訳ございませんが、その質問については分かりません。直接お問い合わせください。"
 
-            # APIが使えないならfallback
             if not self.api_available:
                 return self._generate_fallback_response(normalized_facts)
 
@@ -98,10 +113,10 @@ class ChatGPTFAQ:
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "system", "content": context},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 max_tokens=300,
-                temperature=0.2
+                temperature=0.2,
             )
 
             content = response.choices[0].message.content
@@ -122,74 +137,178 @@ class ChatGPTFAQ:
                 "id": "...",
                 "category": "...",
                 "keys": ["...", "..."],
-                "value": "..."
+                "value": "...",
+                "type": "kb|sales|faq|",
+                "intent": "..."
             }
         ]
         Supports:
-        - new KB format: list[dict]
-        - legacy dict format: {"料金": "...", "営業時間": "..."}
-        - nested dict format: {"kb_facts": ...}
+        - RAGFAQ return dict: {"kb_facts": [...]}
+        - unified entry format
+        - legacy KB list format
+        - simple dict format
         """
         if not kb_facts:
             return []
 
-        # nested structure support
+        # RAGFAQ style wrapper
         if isinstance(kb_facts, dict) and "kb_facts" in kb_facts:
             kb_facts = kb_facts["kb_facts"]
 
         normalized: List[Dict[str, str]] = []
 
-        # New format: list of KB entries
+        # list input
         if isinstance(kb_facts, list):
             for item in kb_facts:
                 if not isinstance(item, dict):
                     continue
 
-                raw_keys = item.get("キー", [])
-                if isinstance(raw_keys, str):
-                    raw_keys = [raw_keys]
-                elif not isinstance(raw_keys, list):
-                    raw_keys = []
-
-                value = item.get("値")
-                if value is None:
+                # unified entry format
+                if "triggers" in item and "response" in item:
+                    normalized_item = self._normalize_unified_entry(item)
+                    if normalized_item:
+                        normalized.append(normalized_item)
                     continue
 
-                keys = [str(k).strip() for k in raw_keys if str(k).strip()]
-                value_str = str(value).strip()
-
-                if not value_str:
+                # legacy KB format
+                if "キー" in item or "値" in item or "カテゴリ" in item:
+                    normalized_item = self._normalize_legacy_kb_entry(item)
+                    if normalized_item:
+                        normalized.append(normalized_item)
                     continue
 
-                normalized.append({
-                    "id": str(item.get("id", "")).strip(),
-                    "category": str(item.get("カテゴリ", "")).strip(),
-                    "keys": keys,
-                    "value": value_str
-                })
+                # already normalized-ish format
+                if "keys" in item and "value" in item:
+                    normalized_item = self._normalize_already_normalized_entry(item)
+                    if normalized_item:
+                        normalized.append(normalized_item)
+                    continue
 
-        # Legacy format: dict
+        # simple dict format
         elif isinstance(kb_facts, dict):
             for key, value in kb_facts.items():
                 if value is None:
                     continue
 
                 value_str = str(value).strip()
-                if not value_str:
+                key_str = str(key).strip()
+                if not key_str or not value_str:
                     continue
 
                 normalized.append({
                     "id": "",
                     "category": "",
-                    "keys": [str(key).strip()],
-                    "value": value_str
+                    "keys": [key_str],
+                    "value": value_str,
+                    "type": "",
+                    "intent": "",
                 })
 
         return normalized
 
+    def _normalize_unified_entry(self, item: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        triggers = item.get("triggers", {})
+        if not isinstance(triggers, dict):
+            triggers = {}
+
+        exact = triggers.get("exact", [])
+        keywords = triggers.get("keywords", [])
+
+        if isinstance(exact, str):
+            exact = [exact]
+        elif not isinstance(exact, list):
+            exact = []
+
+        if isinstance(keywords, str):
+            keywords = [keywords]
+        elif not isinstance(keywords, list):
+            keywords = []
+
+        keys: List[str] = []
+        keys.extend([str(x).strip() for x in exact if str(x).strip()])
+        keys.extend([str(x).strip() for x in keywords if str(x).strip()])
+
+        response_text = self.loader.render_response(item).strip()
+        if not response_text:
+            return None
+
+        return {
+            "id": str(item.get("id", "")).strip(),
+            "category": str(item.get("category", "")).strip(),
+            "keys": self._dedupe_keep_order(keys),
+            "value": response_text,
+            "type": str(item.get("type", "")).strip(),
+            "intent": str(item.get("intent", "")).strip(),
+        }
+
+    def _normalize_legacy_kb_entry(self, item: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        raw_keys = item.get("キー", [])
+        if isinstance(raw_keys, str):
+            raw_keys = [raw_keys]
+        elif not isinstance(raw_keys, list):
+            raw_keys = []
+
+        keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+
+        value = item.get("値")
+        if value is None:
+            return None
+
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+
+        return {
+            "id": str(item.get("id", "")).strip(),
+            "category": str(item.get("カテゴリ", "")).strip(),
+            "keys": self._dedupe_keep_order(keys),
+            "value": value_str,
+            "type": "",
+            "intent": "",
+        }
+
+    def _normalize_already_normalized_entry(self, item: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        raw_keys = item.get("keys", [])
+        if isinstance(raw_keys, str):
+            raw_keys = [raw_keys]
+        elif not isinstance(raw_keys, list):
+            raw_keys = []
+
+        keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+
+        value = item.get("value")
+        if value is None:
+            return None
+
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+
+        return {
+            "id": str(item.get("id", "")).strip(),
+            "category": str(item.get("category", "")).strip(),
+            "keys": self._dedupe_keep_order(keys),
+            "value": value_str,
+            "type": str(item.get("type", "")).strip(),
+            "intent": str(item.get("intent", "")).strip(),
+        }
+
+    def _dedupe_keep_order(self, values: List[str]) -> List[str]:
+        seen = set()
+        result = []
+
+        for value in values:
+            normalized = str(value).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+
+        return result
+
     def _build_kb_context(self, normalized_facts: List[Dict[str, str]]) -> str:
         """
-        Build a strict KB-only context for the model
+        Build a strict KB-only context for the model.
         """
         lines = ["利用可能なKB情報："]
 
@@ -201,6 +320,10 @@ class ChatGPTFAQ:
                 meta.append(f"id={fact['id']}")
             if fact["category"]:
                 meta.append(f"カテゴリ={fact['category']}")
+            if fact["type"]:
+                meta.append(f"type={fact['type']}")
+            if fact["intent"]:
+                meta.append(f"intent={fact['intent']}")
 
             meta_text = f" ({', '.join(meta)})" if meta else ""
 
@@ -218,14 +341,12 @@ class ChatGPTFAQ:
 
     def _generate_fallback_response(self, normalized_facts: Optional[List[Dict[str, str]]] = None) -> str:
         """
-        Generate a simple fallback response using KB facts when API is not available
+        Generate a simple fallback response using KB facts when API is not available.
         """
         if normalized_facts:
-            # 1件だけならそのまま返す
             if len(normalized_facts) == 1:
                 return normalized_facts[0]["value"]
 
-            # 複数あるなら先頭2件だけ返す
             values = [fact["value"] for fact in normalized_facts[:2] if fact.get("value")]
             if values:
                 return "\n".join(values)
