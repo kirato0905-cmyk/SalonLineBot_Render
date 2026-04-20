@@ -18,30 +18,26 @@ from api.google_calendar import GoogleCalendarHelper
 from api.business_hours import (
     get_slot_minutes,
     is_open_date,
-    get_max_end_time_for_date,
     get_reservation_ui_limit_days,
 )
 
 
 class ReservationFlow:
     def __init__(self):
-        self.user_states = {}  # Store user reservation states
+        self.user_states = {}
         self.google_calendar = GoogleCalendarHelper()
         self.line_configuration = None
 
-        # Load services and staff data from JSON
         self.services_data = self._load_services_data()
         self.services = self.services_data.get("services", {})
         self.staff_members = self.services_data.get("staff", {})
 
-        # Load keywords from JSON
         self.keywords_data = self._load_keywords_data()
         self.intent_keywords = self.keywords_data.get("intent_keywords", {})
         self.navigation_keywords = self.keywords_data.get("navigation_keywords", {})
         self.confirmation_keywords = self.keywords_data.get("confirmation_keywords", {})
 
     def _load_services_data(self) -> Dict[str, Any]:
-        """Load services and staff data from JSON file"""
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             services_file = os.path.join(current_dir, "data", "services.json")
@@ -53,7 +49,6 @@ class ReservationFlow:
             raise RuntimeError(f"Cannot load services.json: {e}")
 
     def _load_keywords_data(self) -> Dict[str, Any]:
-        """Load keywords data from JSON file"""
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             keywords_file = os.path.join(current_dir, "data", "keywords.json")
@@ -65,7 +60,6 @@ class ReservationFlow:
             raise RuntimeError(f"Cannot load keywords.json: {e}")
 
     def _calculate_time_duration_minutes(self, start_time: str, end_time: str) -> int:
-        """Calculate duration in minutes between two time strings (HH:MM format)"""
         try:
             start_hour, start_minute = map(int, start_time.split(":"))
             end_hour, end_minute = map(int, end_time.split(":"))
@@ -78,7 +72,6 @@ class ReservationFlow:
             return 0
 
     def _calculate_optimal_end_time(self, start_time: str, service_duration_minutes: int) -> str:
-        """Calculate the optimal end time based on start time and service duration"""
         try:
             start_hour, start_minute = map(int, start_time.split(":"))
             start_total_minutes = start_hour * 60 + start_minute
@@ -93,7 +86,6 @@ class ReservationFlow:
             return start_time
 
     def _get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
-        """Get service dict by id field (e.g. 'cut', 'cut_color')."""
         if not service_id:
             return None
         normalized = str(service_id).strip()
@@ -103,12 +95,10 @@ class ReservationFlow:
         return None
 
     def _get_service_name_by_id(self, service_id: str) -> str:
-        """Get service name by ID"""
         svc = self._get_service_by_id(service_id)
         return svc.get("name", service_id) if svc else service_id
 
     def _get_current_service_id(self, user_id: str) -> Optional[str]:
-        """Get current service_id from state. Supports legacy 'service' by resolving to id."""
         data = self.user_states.get(user_id, {}).get("data", {})
         sid = data.get("service_id")
         if sid:
@@ -118,12 +108,7 @@ class ReservationFlow:
             return self._get_service_id_by_name(name)
         return None
 
-    def _get_staff_name_by_id(self, staff_id: str) -> str:
-        """Get staff name by ID"""
-        return self.staff_members.get(staff_id, {}).get("name", staff_id)
-
     def _get_service_id_by_name(self, service_name: str) -> Optional[str]:
-        """Get service id by name"""
         for _key, service_data in self.services.items():
             if isinstance(service_data, dict) and service_data.get("name") == service_name:
                 return service_data.get("id")
@@ -135,7 +120,6 @@ class ReservationFlow:
         items: List[Dict[str, str]],
         include_cancel: bool = True,
     ) -> Dict[str, Any]:
-        """Build return dict with text and quick_reply_items for LINE Quick Reply."""
         cancel_label = "キャンセル"
         if include_cancel:
             items = list(items) + [{"label": cancel_label, "text": cancel_label}]
@@ -146,7 +130,6 @@ class ReservationFlow:
         filtered_periods: List[Dict[str, Any]],
         service_duration_minutes: int,
     ) -> List[str]:
-        """Build list of start times that fit service duration within each period."""
         slot_minutes = get_slot_minutes()
         start_times_set = set()
 
@@ -175,7 +158,6 @@ class ReservationFlow:
         text: str,
         page: int,
     ) -> Dict[str, Any]:
-        """Build time selection message with paged Quick Reply"""
         time_options = self.user_states[user_id].get("time_options", [])
         per_page = 8
         total_pages = max(1, (len(time_options) + per_page - 1) // per_page)
@@ -195,34 +177,50 @@ class ReservationFlow:
 
         return self._quick_reply_return(text, items)
 
-    def _resolve_service_name(self, identifier: str) -> Optional[str]:
-        """Resolve a service identifier (id, key, or name) to a canonical service name."""
-        if not identifier:
-            return None
+    def _normalize_service_input(self, text: str) -> str:
+        if not text:
+            return ""
+        s = str(text)
+        s = s.replace("＋", "+").replace("\u3000", " ")
+        s = re.sub(r"\s+", " ", s)
+        s = re.sub(r"\s*([+])\s*", r"\1", s)
+        return s.strip()
 
-        normalized = identifier.strip()
-        if normalized in self.services:
-            return self.services[normalized].get("name", normalized)
+    def _fallback_match_service_by_text(self, normalized_input: str) -> List[tuple]:
+        all_services = []
+        for _key, data in self.services.items():
+            if not isinstance(data, dict) or not data.get("id"):
+                continue
+            name = data.get("name", "")
+            if not name:
+                continue
+            all_services.append((data.get("id"), data))
 
-        for service in self.services.values():
-            service_id = service.get("id")
-            service_name = service.get("name")
-            if service_id and service_id.lower() == normalized.lower():
-                return service_name
-            if service_name and service_name.lower() == normalized.lower():
-                return service_name
+        if not all_services:
+            return []
 
-        return None
+        for sid, data in all_services:
+            name = data.get("name", "")
+            norm_name = self._normalize_service_input(name)
+            if normalized_input == name or normalized_input == norm_name:
+                return [(sid, data)]
 
-    def _get_staff_id_by_name(self, staff_name: str) -> str:
-        """Get staff ID by name"""
-        for staff_id, staff_data in self.staff_members.items():
-            if staff_data.get("name") == staff_name:
-                return staff_id
-        return staff_name
+        sorted_by_len = sorted(all_services, key=lambda x: len(x[1].get("name", "")), reverse=True)
+        partial_matches = []
+        for sid, data in sorted_by_len:
+            name = data.get("name", "")
+            norm_name = self._normalize_service_input(name)
+            if (
+                normalized_input in name
+                or normalized_input in norm_name
+                or name in normalized_input
+                or norm_name in normalized_input
+            ):
+                partial_matches.append((sid, data))
+
+        return partial_matches
 
     def _has_single_staff(self) -> bool:
-        """Check if there's only one active staff member (excluding 未指定)"""
         active_staff = [
             staff
             for staff_id, staff in self.staff_members.items()
@@ -231,7 +229,6 @@ class ReservationFlow:
         return len(active_staff) == 1
 
     def _get_single_staff_name(self) -> Optional[str]:
-        """Get the name of the single staff member"""
         active_staff = [
             staff
             for staff_id, staff in self.staff_members.items()
@@ -242,7 +239,6 @@ class ReservationFlow:
         return None
 
     def _get_staff_calendar_url(self, staff_name: str) -> str:
-        """Return the Google Calendar URL for the selected staff."""
         staff_calendar_id = None
         for staff_id, staff_data in self.staff_members.items():
             if staff_data.get("name") == staff_name:
@@ -259,7 +255,6 @@ class ReservationFlow:
         staff_name: str = None,
         user_id: str = None,
     ) -> List[Dict[str, Any]]:
-        """Get available time slots from Google Calendar for a specific date and staff member"""
         if selected_date is None:
             selected_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -272,10 +267,6 @@ class ReservationFlow:
             exclude_reservation_id = None
             if original_reservation and original_reservation.get("date") == selected_date:
                 exclude_reservation_id = original_reservation.get("reservation_id")
-                print(
-                    f"[Get Available Slots] Modification flow: including original reservation time "
-                    f"{original_reservation.get('start_time')}~{original_reservation.get('end_time')}"
-                )
 
             staff_slots = self.google_calendar.get_available_slots_for_modification(
                 selected_date,
@@ -337,7 +328,6 @@ class ReservationFlow:
 
     @staticmethod
     def _calendar_week_monday(d: date) -> date:
-        """Return Monday of the calendar week containing d."""
         return d - timedelta(days=d.weekday())
 
     @staticmethod
@@ -451,11 +441,7 @@ class ReservationFlow:
         header += "※土日・午前中は埋まりやすいためお早めのご予約がおすすめです！\n\n"
         header += f"※{limit_days}日以降は「2026-01-07」の形式でご入力ください。"
 
-        body_note = ""
-        if not bookable:
-            body_note = ""
-
-        text = (f"{error_prefix}\n\n" if error_prefix else "") + header + body_note
+        text = (f"{error_prefix}\n\n" if error_prefix else "") + header
         return self._quick_reply_return(text, items)
 
     def _apply_selected_date_go_to_time_selection(
@@ -463,7 +449,6 @@ class ReservationFlow:
         user_id: str,
         selected_date: str,
     ) -> Union[str, Dict[str, Any]]:
-        """After date selection, validate and go to time selection."""
         self.user_states[user_id]["data"]["date"] = selected_date
         self.user_states[user_id]["step"] = "time_selection"
 
@@ -493,10 +478,7 @@ class ReservationFlow:
         max_slot_duration = 0
 
         for period in available_periods:
-            slot_duration = self._calculate_time_duration_minutes(
-                period["time"],
-                period["end_time"],
-            )
+            slot_duration = self._calculate_time_duration_minutes(period["time"], period["end_time"])
             max_slot_duration = max(max_slot_duration, slot_duration)
 
             if slot_duration >= service_duration:
@@ -546,24 +528,6 @@ class ReservationFlow:
         self.user_states[user_id]["time_selection_service_duration"] = service_duration
         self.user_states[user_id]["time_filtered_periods"] = filtered_periods
 
-        is_modification = self.user_states[user_id].get("is_modification", False)
-        original_reservation = self.user_states[user_id].get("original_reservation") if is_modification else None
-
-        period_strings = []
-        for period in filtered_periods:
-            start_time = period["time"]
-            end_time = period["end_time"]
-            if is_modification and original_reservation:
-                if (
-                    start_time == original_reservation.get("start_time")
-                    and end_time == original_reservation.get("end_time")
-                ):
-                    period_strings.append(f"・{start_time}~{end_time} ⭐（現在の予約時間）")
-                else:
-                    period_strings.append(f"・{start_time}~{end_time}")
-            else:
-                period_strings.append(f"・{start_time}~{end_time}")
-
         text = f"""{selected_date}ですね👌
 
 {service_name}（{service_duration}分）の空き状況はこちら。
@@ -581,11 +545,9 @@ class ReservationFlow:
         return self._build_time_selection_quick_reply(user_id, text, page=0)
 
     def detect_intent(self, message: str, user_id: str = None) -> str:
-        """Detect user intent from message with context awareness"""
         message_normalized = message.strip()
 
         if message_normalized in ["予約変更", "予約を変更", "予約変更したい"]:
-            print(f"Detected 'modify' intent (shortcut) for message: '{message_normalized}'")
             return "modify"
 
         if user_id and user_id in self.user_states:
@@ -618,7 +580,6 @@ class ReservationFlow:
         if re.match(r"^\d{4}-\d{2}-\d{2}$", message_normalized):
             try:
                 datetime.strptime(message_normalized, "%Y-%m-%d")
-                print(f"Detected date format intent for message: '{message_normalized}'")
                 return "reservation_flow"
             except ValueError:
                 pass
@@ -628,20 +589,15 @@ class ReservationFlow:
         modify_keywords = self.intent_keywords.get("modify", [])
 
         if any(keyword in message_normalized for keyword in modify_keywords):
-            print(f"Detected 'modify' intent for message: '{message_normalized}'")
             return "modify"
         elif any(keyword in message_normalized for keyword in cancel_keywords):
-            print(f"Detected 'cancel' intent for message: '{message_normalized}'")
             return "cancel"
         elif any(keyword in message_normalized for keyword in reservation_keywords):
-            print(f"Detected 'reservation' intent for message: '{message_normalized}'")
             return "reservation"
         else:
-            print(f"Detected 'general' intent for message: '{message_normalized}'")
             return "general"
 
     def handle_reservation_flow(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle the complete reservation flow"""
         if user_id not in self.user_states:
             self.user_states[user_id] = {"step": "start", "data": {"user_id": user_id}}
 
@@ -680,9 +636,7 @@ class ReservationFlow:
             return "エラーが発生しました。もう一度最初からお願いいたします。"
 
     def _start_reservation(self, user_id: str) -> Union[str, Dict[str, Any]]:
-        """Start reservation process."""
         self.user_states[user_id]["step"] = "service_selection"
-
         menu_items = self._build_service_quick_reply_postback_items()
 
         text = """ご予約ありがとうございます😊
@@ -705,7 +659,6 @@ class ReservationFlow:
         return self._quick_reply_return(text, menu_items, include_cancel=True)
 
     def _build_service_quick_reply_postback_items(self) -> List[Dict[str, str]]:
-        """Build Quick Reply items with postback for each service."""
         items = []
         for _key, data in self.services.items():
             if isinstance(data, dict) and data.get("id"):
@@ -723,9 +676,6 @@ class ReservationFlow:
         user_id: str,
         service_identifier: str,
     ) -> Union[str, Dict[str, Any]]:
-        """Start reservation with service_id from postback only.
-        Preserve modification context when called from re-reservation flow.
-        """
         if not service_identifier or not str(service_identifier).strip():
             text = "もう一度メニューをお選びください。"
             return self._quick_reply_return(
@@ -757,9 +707,6 @@ class ReservationFlow:
         return self._reply_after_service_selected(user_id)
 
     def start_reservation_with_staff(self, user_id: str, staff_identifier: str) -> Union[str, Dict[str, Any]]:
-        """Start a reservation flow with a preselected staff.
-        Preserve modification context when needed.
-        """
         staff_name = None
 
         if staff_identifier in self.staff_members:
@@ -787,7 +734,6 @@ class ReservationFlow:
         return self._start_reservation(user_id)
 
     def _reply_after_service_selected(self, user_id: str) -> Union[str, Dict[str, Any]]:
-        """Build reply after service is chosen."""
         service_id = self.user_states[user_id]["data"].get("service_id")
         service_name = self._get_service_name_by_id(service_id) if service_id else ""
         preselected_staff = self.user_states[user_id]["data"].get("staff")
@@ -847,53 +793,7 @@ class ReservationFlow:
 →パーマ・似合わせが得意"""
         return self._quick_reply_return(text, staff_items)
 
-    def _normalize_service_input(self, text: str) -> str:
-        """Normalize service input text"""
-        if not text:
-            return ""
-        s = str(text)
-        s = s.replace("＋", "+").replace("\u3000", " ")
-        s = re.sub(r"\s+", " ", s)
-        s = re.sub(r"\s*([+])\s*", r"\1", s)
-        return s.strip()
-
-    def _fallback_match_service_by_text(self, normalized_input: str) -> List[tuple]:
-        """Fallback service matching."""
-        all_services = []
-        for _key, data in self.services.items():
-            if not isinstance(data, dict) or not data.get("id"):
-                continue
-            name = data.get("name", "")
-            if not name:
-                continue
-            all_services.append((data.get("id"), data))
-
-        if not all_services:
-            return []
-
-        for sid, data in all_services:
-            name = data.get("name", "")
-            norm_name = self._normalize_service_input(name)
-            if normalized_input == name or normalized_input == norm_name:
-                return [(sid, data)]
-
-        sorted_by_len = sorted(all_services, key=lambda x: len(x[1].get("name", "")), reverse=True)
-        partial_matches = []
-        for sid, data in sorted_by_len:
-            name = data.get("name", "")
-            norm_name = self._normalize_service_input(name)
-            if (
-                normalized_input in name
-                or normalized_input in norm_name
-                or name in normalized_input
-                or norm_name in normalized_input
-            ):
-                partial_matches.append((sid, data))
-
-        return partial_matches
-
     def _handle_service_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle service selection."""
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         raw = message.strip()
         if any(keyword in raw for keyword in flow_cancel_keywords):
@@ -927,7 +827,6 @@ class ReservationFlow:
         return self._reply_after_service_selected(user_id)
 
     def _handle_staff_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle staff selection"""
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
@@ -974,7 +873,6 @@ class ReservationFlow:
         return reply
 
     def _handle_date_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle date selection."""
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
@@ -1063,10 +961,6 @@ class ReservationFlow:
         return self._apply_selected_date_go_to_time_selection(user_id, selected_date)
 
     def _check_advance_booking_time(self, date_str: str, start_time: str) -> tuple:
-        """
-        Check if the requested booking time is at least 2 hours in advance.
-        Returns (is_valid, error_message)
-        """
         try:
             import pytz
 
@@ -1091,8 +985,53 @@ class ReservationFlow:
             logging.error(f"Error checking advance booking time: {e}")
             return False, "エラーが発生しました。もう一度お試しください。"
 
+    def _normalize_time_format(self, time_str: str) -> Optional[str]:
+        try:
+            parts = time_str.split(":")
+            if len(parts) == 2:
+                hour_part = parts[0]
+                minute_part = parts[1]
+
+                if len(minute_part) != 2 or not minute_part.isdigit():
+                    return None
+
+                if len(hour_part) == 1:
+                    normalized_hour = f"0{hour_part}"
+                elif len(hour_part) == 2 and hour_part.isdigit():
+                    normalized_hour = hour_part
+                else:
+                    return None
+
+                normalized_time = f"{normalized_hour}:{minute_part}"
+                datetime.strptime(normalized_time, "%H:%M")
+                return normalized_time
+            else:
+                return None
+        except (ValueError, IndexError):
+            return None
+
+    def _parse_single_time(self, text: str) -> Optional[str]:
+        text = text.strip()
+
+        match = re.search(r"^(\d{1,2}:\d{2})$", text)
+        if match:
+            return self._normalize_time_format(match.group(1))
+
+        match = re.search(r"^(\d{1,2})$", text)
+        if match:
+            return self._normalize_time_format(f"{match.group(1)}:00")
+
+        match = re.search(r"^(\d{1,2})時$", text)
+        if match:
+            return self._normalize_time_format(f"{match.group(1)}:00")
+
+        match = re.search(r"^(\d{1,2})時(\d{1,2})分$", text)
+        if match:
+            return self._normalize_time_format(f"{match.group(1)}:{match.group(2)}")
+
+        return None
+
     def _handle_time_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle time selection"""
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = message.strip()
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
@@ -1147,7 +1086,6 @@ class ReservationFlow:
 
         selected_date = self.user_states[user_id]["data"]["date"]
         staff_name = self.user_states[user_id]["data"].get("staff")
-        print("[Time Selection] :", staff_name, selected_date)
 
         try:
             available_slots = self._get_available_slots(selected_date, staff_name, user_id)
@@ -1224,7 +1162,6 @@ class ReservationFlow:
         for period in available_periods:
             period_start = period["time"]
             period_end = period["end_time"]
-
             if period_start <= start_time and end_time <= period_end:
                 is_valid_range = True
                 break
@@ -1285,14 +1222,73 @@ class ReservationFlow:
 この内容で予約を確定しますか？"""
         return self._quick_reply_return(text, [{"label": "確定", "text": "確定"}])
 
+    def _check_final_availability(self, reservation_data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            date_str = reservation_data["date"]
+            start_time = reservation_data.get("start_time", reservation_data.get("time", ""))
+            end_time = reservation_data.get("end_time", "")
+            staff_name = reservation_data["staff"]
+            user_id = reservation_data.get("user_id", "")
+
+            if not end_time:
+                sid = reservation_data.get("service_id")
+                if not sid and reservation_data.get("service"):
+                    sid = self._get_service_id_by_name(reservation_data["service"])
+                service_info = self._get_service_by_id(sid) if sid else {}
+                duration = service_info.get("duration", 60)
+                start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
+                end_dt = start_dt + timedelta(minutes=duration)
+                end_time = end_dt.strftime("%H:%M")
+
+            exclude_reservation_id = None
+            try:
+                if user_id and user_id in self.user_states:
+                    state = self.user_states[user_id]
+                    if state.get("is_modification") and state.get("original_reservation"):
+                        original_reservation = state["original_reservation"]
+                        if original_reservation.get("date") == date_str:
+                            exclude_reservation_id = original_reservation.get("reservation_id")
+            except Exception as e:
+                logging.error(f"Error detecting modification context in _check_final_availability: {e}")
+
+            staff_available = self.google_calendar.check_staff_availability_for_time(
+                date_str,
+                start_time,
+                end_time,
+                staff_name,
+                exclude_reservation_id,
+            )
+
+            if not staff_available:
+                return {
+                    "available": False,
+                    "message": f"👨‍💼 {staff_name}さんの{start_time}~{end_time}の時間帯は既に予約が入っております。",
+                }
+
+            user_conflict = self.google_calendar.check_user_time_conflict(
+                date_str,
+                start_time,
+                end_time,
+                user_id,
+                exclude_reservation_id,
+                staff_name,
+            )
+
+            if user_conflict:
+                return {
+                    "available": False,
+                    "message": "⚠️ 同じ時間帯に他のご予約がございます。",
+                }
+
+            return {"available": True, "message": ""}
+
+        except Exception as e:
+            logging.error(f"Error checking final availability: {e}")
+            return {"available": True, "message": ""}
+
     def _handle_confirmation(self, user_id: str, message: str) -> str:
-        """Handle final confirmation"""
         yes_keywords = self.confirmation_keywords.get("yes", [])
         if any(keyword in message for keyword in yes_keywords):
-            print("[CONFIRM DEBUG] full_state =", self.user_states.get(user_id))
-            print("[CONFIRM DEBUG] is_modification =", self.user_states.get(user_id, {}).get("is_modification"))
-            print("[CONFIRM DEBUG] original_reservation =", self.user_states.get(user_id, {}).get("original_reservation"))
-
             reservation_data = self.user_states[user_id]["data"].copy()
 
             if "staff" not in reservation_data or not reservation_data.get("staff"):
@@ -1419,12 +1415,12 @@ class ReservationFlow:
                 return f"""予約の変更が完了しました😊
 
 🆔：{reservation_id}
-📅：{reservation_data['date']} / {time_display}
+📅：{reservation_data['date']} {time_display}
 💇：{reservation_data['service']}
 👤：{reservation_data['staff']}
 
 当日はお気をつけてお越しください。
-ご来店お待ちしております✨"""
+ご来店をお待ちしております✨"""
             else:
                 return f"""ご予約が確定しました😊
 
@@ -1438,472 +1434,7 @@ class ReservationFlow:
 
         return "「確定」とお送りください。"
 
-    def _check_final_availability(self, reservation_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Check if the reservation slot is still available before final confirmation.
-        This prevents race conditions.
-        """
-        try:
-            date_str = reservation_data["date"]
-            start_time = reservation_data.get("start_time", reservation_data.get("time", ""))
-            end_time = reservation_data.get("end_time", "")
-            staff_name = reservation_data["staff"]
-            user_id = reservation_data.get("user_id", "")
-
-            if not end_time:
-                sid = reservation_data.get("service_id")
-                if not sid and reservation_data.get("service"):
-                    sid = self._get_service_id_by_name(reservation_data["service"])
-                service_info = self._get_service_by_id(sid) if sid else {}
-                duration = service_info.get("duration", 60)
-                start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
-                end_dt = start_dt + timedelta(minutes=duration)
-                end_time = end_dt.strftime("%H:%M")
-
-            exclude_reservation_id = None
-            try:
-                if user_id and user_id in self.user_states:
-                    state = self.user_states[user_id]
-                    if state.get("is_modification") and state.get("original_reservation"):
-                        original_reservation = state["original_reservation"]
-                        if original_reservation.get("date") == date_str:
-                            exclude_reservation_id = original_reservation.get("reservation_id")
-            except Exception as e:
-                logging.error(f"Error detecting modification context in _check_final_availability: {e}")
-
-            staff_available = self.google_calendar.check_staff_availability_for_time(
-                date_str,
-                start_time,
-                end_time,
-                staff_name,
-                exclude_reservation_id,
-            )
-
-            if not staff_available:
-                return {
-                    "available": False,
-                    "message": f"👨‍💼 {staff_name}さんの{start_time}~{end_time}の時間帯は既に予約が入っております。",
-                }
-
-            user_conflict = self.google_calendar.check_user_time_conflict(
-                date_str,
-                start_time,
-                end_time,
-                user_id,
-                exclude_reservation_id,
-                staff_name,
-            )
-
-            if user_conflict:
-                return {
-                    "available": False,
-                    "message": "⚠️ 同じ時間帯に他のご予約がございます。",
-                }
-
-            return {"available": True, "message": ""}
-
-        except Exception as e:
-            logging.error(f"Error checking final availability: {e}")
-            return {"available": True, "message": ""}
-
-    def get_response(self, user_id: str, message: str) -> Optional[Union[str, Dict[str, Any]]]:
-        """Main entry point for reservation flow"""
-        intent = self.detect_intent(message, user_id)
-
-        if intent == "reservation":
-            return self.handle_reservation_flow(user_id, message)
-        elif intent == "reservation_flow":
-            return self.handle_reservation_flow(user_id, message)
-        elif intent == "modify":
-            return self._handle_modify_request(user_id, message)
-        elif intent == "cancel":
-            return self._handle_cancel_request(user_id, message)
-        else:
-            return None
-
-    def set_line_configuration(self, configuration):
-        """Set LINE configuration for getting display names"""
-        self.line_configuration = configuration
-
-    def _get_line_display_name(self, user_id: str) -> str:
-        """Get LINE display name for the user"""
-        if not self.line_configuration:
-            return "お客様"
-
-        try:
-            from linebot.v3.messaging import ApiClient, MessagingApi
-
-            with ApiClient(self.line_configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                profile = line_bot_api.get_profile(user_id)
-                return profile.display_name
-        except Exception as e:
-            logging.error(f"Failed to get LINE display name: {e}")
-            return "お客様"
-
-    def _handle_cancel_request(self, user_id: str, message: str = None) -> Union[str, Dict[str, Any]]:
-        """Handle reservation cancellation with reservation selection"""
-        state = self.user_states.get(user_id)
-
-        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        if message:
-            message_normalized = message.strip()
-            if any(keyword in message_normalized for keyword in flow_cancel_keywords):
-                if user_id in self.user_states:
-                    del self.user_states[user_id]
-                return "予約取り消しをキャンセルいたします。またのご利用をお待ちしております。"
-
-        if not state or state.get("step") not in ["cancel_select_reservation", "cancel_confirm"]:
-            self.user_states[user_id] = {"step": "cancel_select_reservation"}
-            return self._show_user_reservations_for_cancellation(user_id)
-
-        elif state.get("step") == "cancel_select_reservation":
-            return self._handle_cancel_reservation_selection(user_id, message)
-
-        elif state.get("step") == "cancel_confirm":
-            return self._handle_cancel_confirmation(user_id, message)
-
-        return "エラーが発生しました。もう一度お試しください。"
-
-    def _show_user_reservations_for_cancellation(self, user_id: str) -> Union[str, Dict[str, Any]]:
-        """Show user's reservations for cancellation selection"""
-        try:
-            from api.google_sheets_logger import GoogleSheetsLogger
-            import pytz
-
-            sheets_logger = GoogleSheetsLogger()
-            client_name = self._get_line_display_name(user_id)
-
-            reservations = sheets_logger.get_user_reservations(client_name)
-            print(f"Found {len(reservations) if reservations else 0} reservations for client: {client_name}")
-
-            if not reservations:
-                return "申し訳ございませんが、あなたの予約が見つかりませんでした。"
-
-            tokyo_tz = pytz.timezone("Asia/Tokyo")
-            current_time = datetime.now(tokyo_tz)
-            future_reservations = []
-
-            for res in reservations:
-                try:
-                    reservation_date = res.get("date", "")
-                    reservation_start_time = res.get("start_time", "")
-
-                    if not reservation_date or not reservation_start_time:
-                        continue
-
-                    reservation_datetime_naive = datetime.strptime(
-                        f"{reservation_date} {reservation_start_time}",
-                        "%Y-%m-%d %H:%M",
-                    )
-                    reservation_datetime = tokyo_tz.localize(reservation_datetime_naive)
-
-                    if reservation_datetime > current_time:
-                        future_reservations.append(res)
-
-                except (ValueError, TypeError) as e:
-                    logging.warning(
-                        f"Skipping reservation with invalid date/time: "
-                        f"{res.get('reservation_id', 'Unknown')} - {e}"
-                    )
-                    continue
-
-            if not future_reservations:
-                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。\n過去の予約はキャンセルできません。"
-
-            self.user_states[user_id]["user_reservations"] = future_reservations
-
-            reservation_list = []
-            quick_reply_items = []
-            for i, res in enumerate(future_reservations[:5], 1):
-                reservation_list.append(
-                    f"{i}️⃣ {res['date']} {res['start_time']}~{res['end_time']} - {res['service']} ({res['reservation_id']})"
-                )
-                quick_reply_items.append({"label": f"{i}️⃣", "text": str(i)})
-
-            text = f"""ご予約のキャンセルですね😊
-
-キャンセルする予約をお選びください👇
-
-{chr(10).join(reservation_list)}"""
-            return self._quick_reply_return(text, quick_reply_items)
-
-        except Exception as e:
-            logging.error(f"Failed to show user reservations for cancellation: {e}")
-            return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
-
-    def _handle_cancel_reservation_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle reservation selection for cancellation"""
-        state = self.user_states[user_id]
-        if "user_reservations" not in state:
-            return self._show_user_reservations_for_cancellation(user_id)
-
-        reservations = state["user_reservations"]
-
-        try:
-            if re.match(r"^RES-\d{8}-\d{4}$", message):
-                reservation_id = message
-                selected_reservation = None
-                print(f"Looking for reservation ID: {reservation_id}")
-                print(f"Available reservations: {[res['reservation_id'] for res in reservations]}")
-                for res in reservations:
-                    if res["reservation_id"] == reservation_id:
-                        selected_reservation = res
-                        break
-
-                if selected_reservation:
-                    self.user_states[user_id]["selected_reservation"] = selected_reservation
-                    self.user_states[user_id]["step"] = "cancel_confirm"
-
-                    text = f"""こちらのご予約をキャンセルしてよろしいですか？
-
- 📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
- 💇：{selected_reservation['service']}
- 👤：{selected_reservation['staff']}"""
-                    return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
-                else:
-                    return self._quick_reply_return(
-                        "申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。",
-                        [],
-                    )
-
-            elif message.isdigit():
-                reservation_index = int(message) - 1
-                if 0 <= reservation_index < len(reservations):
-                    selected_reservation = reservations[reservation_index]
-
-                    self.user_states[user_id]["selected_reservation"] = selected_reservation
-                    self.user_states[user_id]["step"] = "cancel_confirm"
-
-                    text = f"""こちらのご予約をキャンセルしてよろしいですか？
-
- 📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
- 💇：{selected_reservation['service']}
- 👤：{selected_reservation['staff']}"""
-                    return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
-                else:
-                    return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。"
-            else:
-                return f"申し訳ございませんが、正しい形式で入力してください。\n番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXX）を入力してください。"
-
-        except Exception as e:
-            logging.error(f"Reservation selection for cancellation failed: {e}")
-            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
-
-    def _handle_cancel_confirmation(self, user_id: str, message: str) -> str:
-        """Handle cancellation confirmation"""
-        state = self.user_states[user_id]
-        reservation = state["selected_reservation"]
-
-        yes_keywords = self.confirmation_keywords.get("yes", [])
-        no_keywords = self.confirmation_keywords.get("no", [])
-
-        if any(keyword in message for keyword in yes_keywords):
-            return self._execute_reservation_cancellation(user_id, reservation)
-        elif any(keyword in message for keyword in no_keywords):
-            del self.user_states[user_id]
-            return "予約取り消しをキャンセルいたします。予約はそのまま残ります。\nまたのご利用をお待ちしております。"
-        else:
-            return "「はい」または「確定」でキャンセルを確定するか、「キャンセル」で中止してください。"
-
-    def _execute_reservation_cancellation(self, user_id: str, reservation: Dict[str, Any]) -> str:
-        """Execute the actual reservation cancellation"""
-        try:
-            import pytz
-
-            tokyo_tz = pytz.timezone("Asia/Tokyo")
-            current_time = datetime.now(tokyo_tz)
-
-            reservation_date = reservation["date"]
-            reservation_start_time = reservation["start_time"]
-
-            reservation_datetime = datetime.strptime(
-                f"{reservation_date} {reservation_start_time}",
-                "%Y-%m-%d %H:%M",
-            )
-            reservation_datetime = tokyo_tz.localize(reservation_datetime)
-
-            time_diff = reservation_datetime - current_time
-
-            if time_diff.total_seconds() <= 7200:
-                return """申し訳ございませんが、予約開始時刻の2時間以内のキャンセルはお受けできません。
-
-緊急の場合は直接サロンまでお電話ください。"""
-
-        except Exception as e:
-            logging.error(f"Error checking cancellation time limit: {e}")
-
-        try:
-            from api.google_sheets_logger import GoogleSheetsLogger
-
-            sheets_logger = GoogleSheetsLogger()
-
-            reservation_id = reservation["reservation_id"]
-            sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
-
-            if not sheets_success:
-                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
-
-            staff_name = reservation.get("staff")
-            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id, staff_name)
-
-            if not calendar_success:
-                logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
-
-            try:
-                from api.notification_manager import send_reservation_cancellation_notification
-
-                client_name = self._get_line_display_name(user_id)
-                send_reservation_cancellation_notification(reservation, client_name)
-            except Exception as e:
-                logging.error(f"Failed to send reservation cancellation notification: {e}")
-
-            del self.user_states[user_id]
-
-            return """✅キャンセルが完了しました。
-
-ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
-
-        except Exception as e:
-            logging.error(f"Reservation cancellation execution failed: {e}")
-            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください"
-
-    def _handle_reservation_id_cancellation(self, user_id: str, reservation_id: str) -> str:
-        """Handle direct reservation cancellation by ID"""
-        try:
-            from api.google_sheets_logger import GoogleSheetsLogger
-
-            sheets_logger = GoogleSheetsLogger()
-            sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
-
-            if not sheets_success:
-                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
-
-            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id)
-
-            if not calendar_success:
-                logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
-
-            return """✅キャンセルが完了しました。
-
-ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
-
-        except Exception as e:
-            logging.error(f"Reservation ID cancellation failed: {e}")
-            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
-
-    def _normalize_time_format(self, time_str: str) -> Optional[str]:
-        """Normalize time string to HH:MM format"""
-        try:
-            parts = time_str.split(":")
-            if len(parts) == 2:
-                hour_part = parts[0]
-                minute_part = parts[1]
-
-                if len(minute_part) != 2 or not minute_part.isdigit():
-                    return None
-
-                if len(hour_part) == 1:
-                    normalized_hour = f"0{hour_part}"
-                elif len(hour_part) == 2 and hour_part.isdigit():
-                    normalized_hour = hour_part
-                else:
-                    return None
-
-                normalized_time = f"{normalized_hour}:{minute_part}"
-                datetime.strptime(normalized_time, "%H:%M")
-                return normalized_time
-            else:
-                return None
-        except (ValueError, IndexError):
-            return None
-
-    def _parse_time_range(self, text: str) -> tuple:
-        """Parse start and end times from user input."""
-        text = text.strip()
-
-        match = re.search(r"^(\d{1,2}:\d{2})[~～](\d{1,2}:\d{2})$", text)
-        if match:
-            start_time = self._normalize_time_format(match.group(1))
-            end_time = self._normalize_time_format(match.group(2))
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2}:\d{2})\s+(\d{1,2}:\d{2})$", text)
-        if match:
-            start_time = self._normalize_time_format(match.group(1))
-            end_time = self._normalize_time_format(match.group(2))
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2})[~～](\d{1,2})$", text)
-        if match:
-            start_time = self._normalize_time_format(f"{match.group(1)}:00")
-            end_time = self._normalize_time_format(f"{match.group(2)}:00")
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2})\s+(\d{1,2})$", text)
-        if match:
-            start_time = self._normalize_time_format(f"{match.group(1)}:00")
-            end_time = self._normalize_time_format(f"{match.group(2)}:00")
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2})時[~～](\d{1,2})時$", text)
-        if match:
-            start_time = self._normalize_time_format(f"{match.group(1)}:00")
-            end_time = self._normalize_time_format(f"{match.group(2)}:00")
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2})時\s+(\d{1,2})時$", text)
-        if match:
-            start_time = self._normalize_time_format(f"{match.group(1)}:00")
-            end_time = self._normalize_time_format(f"{match.group(2)}:00")
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2}:\d{2})[~～](\d{1,2})$", text)
-        if match:
-            start_time = self._normalize_time_format(match.group(1))
-            end_time = self._normalize_time_format(f"{match.group(2)}:00")
-            if start_time and end_time:
-                return start_time, end_time
-
-        match = re.search(r"^(\d{1,2}:\d{2})\s+(\d{1,2})$", text)
-        if match:
-            start_time = self._normalize_time_format(match.group(1))
-            end_time = self._normalize_time_format(f"{match.group(2)}:00")
-            if start_time and end_time:
-                return start_time, end_time
-
-        return None, None
-
-    def _parse_single_time(self, text: str) -> Optional[str]:
-        """Parse a single time from user input."""
-        text = text.strip()
-
-        match = re.search(r"^(\d{1,2}:\d{2})$", text)
-        if match:
-            return self._normalize_time_format(match.group(1))
-
-        match = re.search(r"^(\d{1,2})$", text)
-        if match:
-            return self._normalize_time_format(f"{match.group(1)}:00")
-
-        match = re.search(r"^(\d{1,2})時$", text)
-        if match:
-            return self._normalize_time_format(f"{match.group(1)}:00")
-
-        match = re.search(r"^(\d{1,2})時(\d{1,2})分$", text)
-        if match:
-            return self._normalize_time_format(f"{match.group(1)}:{match.group(2)}")
-
-        return None
-
     def _handle_modify_request(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle reservation modification using re-reservation only"""
         state = self.user_states.get(user_id)
 
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
@@ -1923,7 +1454,6 @@ class ReservationFlow:
         return "エラーが発生しました。もう一度お試しください。"
 
     def _show_user_reservations_for_modification(self, user_id: str) -> Union[str, Dict[str, Any]]:
-        """Show user's reservations for modification selection"""
         try:
             from api.google_sheets_logger import GoogleSheetsLogger
             import pytz
@@ -1995,7 +1525,6 @@ class ReservationFlow:
             return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
 
     def _handle_modify_reservation_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        """Handle reservation selection for modification (re-reservation only)"""
         state = self.user_states[user_id]
 
         if "user_reservations" not in state:
@@ -2008,7 +1537,6 @@ class ReservationFlow:
 
             if re.match(r"^RES-\d{8}-\d{4}$", message):
                 reservation_id = message.strip()
-
                 for res in reservations:
                     if res["reservation_id"] == reservation_id:
                         selected_reservation = res
@@ -2081,9 +1609,282 @@ class ReservationFlow:
                 "変更をやめる場合は「キャンセル」とお送りください。"
             )
 
+    def get_response(self, user_id: str, message: str) -> Optional[Union[str, Dict[str, Any]]]:
+        intent = self.detect_intent(message, user_id)
+
+        if intent == "reservation":
+            return self.handle_reservation_flow(user_id, message)
+        elif intent == "reservation_flow":
+            return self.handle_reservation_flow(user_id, message)
+        elif intent == "modify":
+            return self._handle_modify_request(user_id, message)
+        elif intent == "cancel":
+            return self._handle_cancel_request(user_id, message)
+        else:
+            return None
+
+    def set_line_configuration(self, configuration):
+        self.line_configuration = configuration
+
+    def _get_line_display_name(self, user_id: str) -> str:
+        if not self.line_configuration:
+            return "お客様"
+
+        try:
+            from linebot.v3.messaging import ApiClient, MessagingApi
+
+            with ApiClient(self.line_configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                profile = line_bot_api.get_profile(user_id)
+                return profile.display_name
+        except Exception as e:
+            logging.error(f"Failed to get LINE display name: {e}")
+            return "お客様"
+
+    def _handle_cancel_request(self, user_id: str, message: str = None) -> Union[str, Dict[str, Any]]:
+        state = self.user_states.get(user_id)
+
+        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
+        if message:
+            message_normalized = message.strip()
+            if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return "予約取り消しをキャンセルいたします。またのご利用をお待ちしております。"
+
+        if not state or state.get("step") not in ["cancel_select_reservation", "cancel_confirm"]:
+            self.user_states[user_id] = {"step": "cancel_select_reservation"}
+            return self._show_user_reservations_for_cancellation(user_id)
+
+        elif state.get("step") == "cancel_select_reservation":
+            return self._handle_cancel_reservation_selection(user_id, message)
+
+        elif state.get("step") == "cancel_confirm":
+            return self._handle_cancel_confirmation(user_id, message)
+
+        return "エラーが発生しました。もう一度お試しください。"
+
+    def _show_user_reservations_for_cancellation(self, user_id: str) -> Union[str, Dict[str, Any]]:
+        try:
+            from api.google_sheets_logger import GoogleSheetsLogger
+            import pytz
+
+            sheets_logger = GoogleSheetsLogger()
+            client_name = self._get_line_display_name(user_id)
+
+            reservations = sheets_logger.get_user_reservations(client_name)
+
+            if not reservations:
+                return "申し訳ございませんが、あなたの予約が見つかりませんでした。"
+
+            tokyo_tz = pytz.timezone("Asia/Tokyo")
+            current_time = datetime.now(tokyo_tz)
+            future_reservations = []
+
+            for res in reservations:
+                try:
+                    reservation_date = res.get("date", "")
+                    reservation_start_time = res.get("start_time", "")
+
+                    if not reservation_date or not reservation_start_time:
+                        continue
+
+                    reservation_datetime_naive = datetime.strptime(
+                        f"{reservation_date} {reservation_start_time}",
+                        "%Y-%m-%d %H:%M",
+                    )
+                    reservation_datetime = tokyo_tz.localize(reservation_datetime_naive)
+
+                    if reservation_datetime > current_time:
+                        future_reservations.append(res)
+
+                except (ValueError, TypeError) as e:
+                    logging.warning(
+                        f"Skipping reservation with invalid date/time: "
+                        f"{res.get('reservation_id', 'Unknown')} - {e}"
+                    )
+                    continue
+
+            if not future_reservations:
+                return "申し訳ございませんが、今後予定されている予約が見つかりませんでした。\n過去の予約はキャンセルできません。"
+
+            self.user_states[user_id]["user_reservations"] = future_reservations
+
+            reservation_list = []
+            quick_reply_items = []
+            for i, res in enumerate(future_reservations[:5], 1):
+                reservation_list.append(
+                    f"{i}️⃣ {res['date']} {res['start_time']}~{res['end_time']} - {res['service']} ({res['reservation_id']})"
+                )
+                quick_reply_items.append({"label": f"{i}️⃣", "text": str(i)})
+
+            text = f"""ご予約のキャンセルですね😊
+
+キャンセルする予約をお選びください👇
+
+{chr(10).join(reservation_list)}"""
+            return self._quick_reply_return(text, quick_reply_items)
+
+        except Exception as e:
+            logging.error(f"Failed to show user reservations for cancellation: {e}")
+            return "申し訳ございません。エラーが発生しました。もう一度お試しください。"
+
+    def _handle_cancel_reservation_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        state = self.user_states[user_id]
+        if "user_reservations" not in state:
+            return self._show_user_reservations_for_cancellation(user_id)
+
+        reservations = state["user_reservations"]
+
+        try:
+            if re.match(r"^RES-\d{8}-\d{4}$", message):
+                reservation_id = message
+                selected_reservation = None
+                for res in reservations:
+                    if res["reservation_id"] == reservation_id:
+                        selected_reservation = res
+                        break
+
+                if selected_reservation:
+                    self.user_states[user_id]["selected_reservation"] = selected_reservation
+                    self.user_states[user_id]["step"] = "cancel_confirm"
+
+                    text = f"""こちらのご予約をキャンセルしてよろしいですか？
+
+ 📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
+ 💇：{selected_reservation['service']}
+ 👤：{selected_reservation['staff']}"""
+                    return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
+                else:
+                    return self._quick_reply_return(
+                        "申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。",
+                        [],
+                    )
+
+            elif message.isdigit():
+                reservation_index = int(message) - 1
+                if 0 <= reservation_index < len(reservations):
+                    selected_reservation = reservations[reservation_index]
+
+                    self.user_states[user_id]["selected_reservation"] = selected_reservation
+                    self.user_states[user_id]["step"] = "cancel_confirm"
+
+                    text = f"""こちらのご予約をキャンセルしてよろしいですか？
+
+ 📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
+ 💇：{selected_reservation['service']}
+ 👤：{selected_reservation['staff']}"""
+                    return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
+                else:
+                    return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。"
+            else:
+                return f"申し訳ございませんが、正しい形式で入力してください。\n番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXX）を入力してください。"
+
+        except Exception as e:
+            logging.error(f"Reservation selection for cancellation failed: {e}")
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+
+    def _handle_cancel_confirmation(self, user_id: str, message: str) -> str:
+        state = self.user_states[user_id]
+        reservation = state["selected_reservation"]
+
+        yes_keywords = self.confirmation_keywords.get("yes", [])
+        no_keywords = self.confirmation_keywords.get("no", [])
+
+        if any(keyword in message for keyword in yes_keywords):
+            return self._execute_reservation_cancellation(user_id, reservation)
+        elif any(keyword in message for keyword in no_keywords):
+            del self.user_states[user_id]
+            return "予約取り消しをキャンセルいたします。予約はそのまま残ります。\nまたのご利用をお待ちしております。"
+        else:
+            return "「はい」または「確定」でキャンセルを確定するか、「キャンセル」で中止してください。"
+
+    def _execute_reservation_cancellation(self, user_id: str, reservation: Dict[str, Any]) -> str:
+        try:
+            import pytz
+
+            tokyo_tz = pytz.timezone("Asia/Tokyo")
+            current_time = datetime.now(tokyo_tz)
+
+            reservation_date = reservation["date"]
+            reservation_start_time = reservation["start_time"]
+
+            reservation_datetime = datetime.strptime(
+                f"{reservation_date} {reservation_start_time}",
+                "%Y-%m-%d %H:%M",
+            )
+            reservation_datetime = tokyo_tz.localize(reservation_datetime)
+
+            time_diff = reservation_datetime - current_time
+
+            if time_diff.total_seconds() <= 7200:
+                return """申し訳ございませんが、予約開始時刻の2時間以内のキャンセルはお受けできません。
+
+緊急の場合は直接サロンまでお電話ください。"""
+
+        except Exception as e:
+            logging.error(f"Error checking cancellation time limit: {e}")
+
+        try:
+            from api.google_sheets_logger import GoogleSheetsLogger
+
+            sheets_logger = GoogleSheetsLogger()
+
+            reservation_id = reservation["reservation_id"]
+            sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
+
+            if not sheets_success:
+                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+
+            staff_name = reservation.get("staff")
+            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id, staff_name)
+
+            if not calendar_success:
+                logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
+
+            try:
+                from api.notification_manager import send_reservation_cancellation_notification
+
+                client_name = self._get_line_display_name(user_id)
+                send_reservation_cancellation_notification(reservation, client_name)
+            except Exception as e:
+                logging.error(f"Failed to send reservation cancellation notification: {e}")
+
+            del self.user_states[user_id]
+
+            return """✅キャンセルが完了しました。
+
+ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
+
+        except Exception as e:
+            logging.error(f"Reservation cancellation execution failed: {e}")
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください"
+
+    def _handle_reservation_id_cancellation(self, user_id: str, reservation_id: str) -> str:
+        try:
+            from api.google_sheets_logger import GoogleSheetsLogger
+
+            sheets_logger = GoogleSheetsLogger()
+            sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
+
+            if not sheets_success:
+                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+
+            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id)
+
+            if not calendar_success:
+                logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
+
+            return """✅キャンセルが完了しました。
+
+ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
+
+        except Exception as e:
+            logging.error(f"Reservation ID cancellation failed: {e}")
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+
 
 def main():
-    """Interactive test function for reservation flow"""
     print("=== Interactive Reservation Flow Tester ===")
     print("Type your messages to test the reservation system interactively!")
     print("Type 'quit' or 'exit' to stop testing.")
@@ -2148,7 +1949,6 @@ def main():
 
 
 def print_help():
-    """Print help information for the interactive tester"""
     print("\n" + "=" * 60)
     print("📖 INTERACTIVE TESTER HELP")
     print("=" * 60)
@@ -2180,7 +1980,6 @@ def print_help():
 
 
 def print_user_status(rf, user_id):
-    """Print current user state information"""
     print(f"\n📊 USER STATUS: {user_id}")
     print("-" * 40)
 
@@ -2205,7 +2004,6 @@ def print_user_status(rf, user_id):
 
 
 def clear_user_state(rf, user_id):
-    """Clear the current user state"""
     if user_id in rf.user_states:
         del rf.user_states[user_id]
         print(f"✅ Cleared user state for {user_id}")
