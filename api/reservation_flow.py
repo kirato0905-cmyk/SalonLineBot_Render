@@ -13,6 +13,12 @@ Added:
   - Reservation flow via staff introduction
 - Safe handling for modification/cancellation when user has no reservations:
   do not enter modify/cancel state until a valid reservation list exists
+
+Updated:
+- Reservation deadline rules are now managed by data/settings.json
+- Separate limits for create / change / cancel
+- Invalid or missing settings fallback to 2 hours
+- settings.json is reloaded on every rule read for immediate reflection
 """
 
 import re
@@ -46,6 +52,8 @@ class ReservationFlow:
         self.navigation_keywords = self.keywords_data.get("navigation_keywords", {})
         self.confirmation_keywords = self.keywords_data.get("confirmation_keywords", {})
 
+        self.settings_data = self._load_settings_data()
+
         self.back_label = "← 戻る"
 
     def _load_services_data(self) -> Dict[str, Any]:
@@ -69,6 +77,98 @@ class ReservationFlow:
         except Exception as e:
             logging.error(f"Failed to load keywords data: {e}")
             raise RuntimeError(f"Cannot load keywords.json: {e}")
+
+    def _load_settings_data(self) -> Dict[str, Any]:
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            settings_file = os.path.join(current_dir, "data", "settings.json")
+
+            if not os.path.exists(settings_file):
+                logging.warning("settings.json not found. Using default reservation rules.")
+                return {}
+
+            with open(settings_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Failed to load settings data: {e}")
+            return {}
+
+    def _get_reservation_limit_hours(self, rule_key: str, default: int = 2) -> int:
+        """
+        Reload settings.json every time for immediate reflection.
+        Fallback to default when the setting is missing or invalid.
+        """
+        try:
+            self.settings_data = self._load_settings_data()
+            reservation_rules = self.settings_data.get("reservation_rules", {})
+            value = reservation_rules.get(rule_key, default)
+
+            if value is None:
+                return default
+
+            if isinstance(value, bool):
+                return default
+
+            if isinstance(value, str):
+                value = value.strip()
+                if not value.isdigit():
+                    return default
+                value = int(value)
+
+            if not isinstance(value, (int, float)):
+                return default
+
+            if value < 0:
+                return default
+
+            return int(value)
+        except Exception as e:
+            logging.warning(
+                f"Invalid reservation rule '{rule_key}'. Using default={default}. error={e}"
+            )
+            return default
+
+    def _check_reservation_deadline(
+        self,
+        date_str: str,
+        start_time: str,
+        limit_hours: int,
+        action_label: str = "予約",
+        selection_label: Optional[str] = None,
+    ) -> tuple:
+        """
+        Common deadline checker.
+        Rule:
+            deadline_datetime = reservation_start - limit_hours
+            if current_datetime > deadline_datetime: reject
+        """
+        try:
+            import pytz
+
+            tokyo_tz = pytz.timezone("Asia/Tokyo")
+
+            reservation_datetime_naive = datetime.strptime(
+                f"{date_str} {start_time}",
+                "%Y-%m-%d %H:%M",
+            )
+            reservation_datetime = tokyo_tz.localize(reservation_datetime_naive)
+            current_datetime = datetime.now(tokyo_tz)
+
+            deadline_datetime = reservation_datetime - timedelta(hours=limit_hours)
+
+            if current_datetime > deadline_datetime:
+                target_label = selection_label or "時間帯"
+                error_message = (
+                    f"申し訳ございませんが、{action_label}は来店の{limit_hours}時間前までとなっております。\n"
+                    f"{limit_hours}時間以上先の{target_label}をご選択ください。"
+                )
+                return False, error_message
+
+            return True, None
+
+        except Exception as e:
+            logging.error(f"Error checking reservation deadline: {e}")
+            return False, "エラーが発生しました。もう一度お試しください。"
 
     def _calculate_time_duration_minutes(self, start_time: str, end_time: str) -> int:
         try:
@@ -1128,30 +1228,25 @@ class ReservationFlow:
 
         return self._apply_selected_date_go_to_time_selection(user_id, selected_date)
 
-    def _check_advance_booking_time(self, date_str: str, start_time: str) -> tuple:
-        try:
-            import pytz
+    def _check_advance_booking_time(self, date_str: str, start_time: str, user_id: str = None) -> tuple:
+        is_modification = False
+        if user_id and user_id in self.user_states:
+            is_modification = self.user_states[user_id].get("is_modification", False)
 
-            tokyo_tz = pytz.timezone("Asia/Tokyo")
+        if is_modification:
+            limit_hours = self._get_reservation_limit_hours("change_limit_hours", 2)
+            action_label = "予約変更"
+        else:
+            limit_hours = self._get_reservation_limit_hours("create_limit_hours", 2)
+            action_label = "ご予約"
 
-            requested_datetime_naive = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
-            requested_datetime = tokyo_tz.localize(requested_datetime_naive)
-
-            current_datetime = datetime.now(tokyo_tz)
-
-            time_difference = requested_datetime - current_datetime
-            hours_until_booking = time_difference.total_seconds() / 3600
-
-            if hours_until_booking < 1.99:
-                error_message = """申し訳ございませんが、ご予約は来店の2時間前までにお取りください。
-2時間以上先の時間帯をご選択ください。"""
-                return False, error_message
-
-            return True, None
-
-        except Exception as e:
-            logging.error(f"Error checking advance booking time: {e}")
-            return False, "エラーが発生しました。もう一度お試しください。"
+        return self._check_reservation_deadline(
+            date_str=date_str,
+            start_time=start_time,
+            limit_hours=limit_hours,
+            action_label=action_label,
+            selection_label="時間帯",
+        )
 
     def _normalize_time_format(self, time_str: str) -> Optional[str]:
         try:
@@ -1316,7 +1411,11 @@ class ReservationFlow:
 
 ❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
 
-        is_valid_time, time_error_message = self._check_advance_booking_time(selected_date, start_time)
+        is_valid_time, time_error_message = self._check_advance_booking_time(
+            selected_date,
+            start_time,
+            user_id,
+        )
         if not is_valid_time:
             return time_error_message
 
@@ -2031,12 +2130,14 @@ class ReservationFlow:
             )
             reservation_datetime = tokyo_tz.localize(reservation_datetime)
 
-            time_diff = reservation_datetime - current_time
+            cancel_limit_hours = self._get_reservation_limit_hours("cancel_limit_hours", 2)
+            deadline_datetime = reservation_datetime - timedelta(hours=cancel_limit_hours)
 
-            if time_diff.total_seconds() <= 7200:
-                return """申し訳ございませんが、予約開始時刻の2時間以内のキャンセルはお受けできません。
-
-緊急の場合は直接サロンまでお電話ください。"""
+            if current_time > deadline_datetime:
+                return (
+                    f"申し訳ございませんが、予約開始時刻の{cancel_limit_hours}時間以内のキャンセルはお受けできません。\n\n"
+                    f"緊急の場合は直接サロンまでお電話ください。"
+                )
 
         except Exception as e:
             logging.error(f"Error checking cancellation time limit: {e}")
