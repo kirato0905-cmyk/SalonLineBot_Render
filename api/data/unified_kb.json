@@ -1,0 +1,1490 @@
+import json, textwrap, os
+
+data = {
+  "version": "1.0.0",
+  "store_settings": {
+    "store_name": "SalonAI 表参道店",
+    "address": "東京都渋谷区神宮前4-3-10 グリーン表参道ビル2F",
+    "nearest_station": "表参道駅",
+    "access": "表参道駅A1出口より青山通りを外苑方面へ徒歩3分、1Fにカフェのあるビルの2F",
+    "phone": "03-1234-5678（受付は営業時間内）",
+    "sns": "@salonai_omotesando",
+    "hours": "営業時間は平日10:00〜20:00、土日祝10:00〜20:00です。",
+    "closed_days": "毎週火曜・第2水曜",
+    "holiday_season": "お盆や年末年始は、時期によって営業時間や混雑状況が異なる場合がある",
+    "parking": "駐車場あり",
+    "bicycle": "駐輪スペースあり",
+    "nomination_fee": "一律¥500です。",
+    "new_customer_coupon": "初回限定で10％OFFです。対象はセットメニュー以外となります。"
+  },
+  "entries": [
+    {
+      "id": "faq_price",
+      "type": "faq",
+      "category": "料金",
+      "intent": "price",
+      "triggers": {
+        "exact": ["料金を知りたい"],
+        "keywords": ["料金", "値段", "いくら", "金額"]
+      },
+      "response": {
+        "text": "料金はサービスメニューからご確認いただけます😊",
+        "cta": "ご希望のメニューが決まりましたら、そのまま簡単にご予約いただけます✨"
+      },
+      "priority": 100,
+      "tags": ["faq", "price"],
+      "enabled": True
+    },
+    {
+      "id": "faq_menu",
+      "type": "faq",
+      "category": "メニュー",
+      "intent": "menu",
+      "triggers": {
+        "exact": ["メニューを知りたい"],
+        "keywords": ["メニュー", "どんなメニュー", "何がある", "メニュー一覧"]
+      },
+      "response": {
+        "text": "メニューはサービスメニューからご確認いただけます😊",
+        "cta": "ご希望のメニューが決まりましたら、そのまま簡単にご予約いただけます✨"
+      },
+      "priority": 100,
+      "tags": ["faq", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "faq_same_day_reservation",
+      "type": "faq",
+      "category": "予約",
+      "intent": "same_day_reservation",
+      "triggers": {
+        "exact": ["今日予約できる？"],
+        "keywords": ["当日予約", "今日いける", "今日予約できる", "今から行ける"]
+      },
+      "response": {
+        "text": "本日も空きがあればご予約いただけます👌",
+        "cta": "「ご予約」ボタンから空き状況をご確認いただけますので、そのままご予約も可能です✨"
+      },
+      "priority": 100,
+      "tags": ["faq", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "faq_reservation_change_deadline",
+      "type": "faq",
+      "category": "予約",
+      "intent": "reservation_change_deadline",
+      "triggers": {
+        "exact": ["予約変更はいつまでできる？"],
+        "keywords": ["変更できる", "予約変更", "日時変更", "予約変えたい"]
+      },
+      "response": {
+        "text": "予約変更は前日まで可能です👌",
+        "cta": "「予約変更」ボタンから簡単にお手続きいただけますので、ご都合に合わせてご利用ください✨"
+      },
+      "priority": 100,
+      "tags": ["faq", "reservation_change"],
+      "enabled": True
+    },
+    {
+      "id": "faq_cancellation_deadline",
+      "type": "faq",
+      "category": "予約",
+      "intent": "cancellation_deadline",
+      "triggers": {
+        "exact": ["予約キャンセルはいつまでできる？"],
+        "keywords": ["キャンセルできる", "キャンセル", "キャンセル料", "キャンセル規定", "予約取り消し"]
+      },
+      "response": {
+        "text": "予約キャンセルは前日まで可能です👌",
+        "cta": "「予約取り消し」ボタンからお手続きいただけます。ご都合に合わせてご利用ください✨"
+      },
+      "priority": 100,
+      "tags": ["faq", "cancellation"],
+      "enabled": True
+    },
+    {
+      "id": "faq_late_arrival",
+      "type": "faq",
+      "category": "予約",
+      "intent": "late_arrival",
+      "triggers": {
+        "exact": ["遅刻しそう"],
+        "keywords": ["遅れそう", "遅刻", "間に合わない", "遅れたらどうなる"]
+      },
+      "response": {
+        "text": "遅刻される場合は、事前にご連絡をお願いいたします🙇‍♂️\nできる限りご対応させていただきますが、お時間によっては施術内容の変更やご案内が難しくなる場合がございます。"
+      },
+      "priority": 100,
+      "tags": ["faq", "late_arrival"],
+      "enabled": True
+    },
+    {
+      "id": "faq_parking",
+      "type": "faq",
+      "category": "設備",
+      "intent": "parking",
+      "triggers": {
+        "exact": ["駐車場ある？"],
+        "keywords": ["駐車場", "車", "車で行ける"]
+      },
+      "response": {
+        "text": "駐車場のご用意がございます🚗\nお車でも安心してご来店いただけますので、ぜひご利用ください😊"
+      },
+      "priority": 100,
+      "tags": ["faq", "facility"],
+      "enabled": True
+    },
+    {
+      "id": "faq_payment_method",
+      "type": "faq",
+      "category": "料金",
+      "intent": "payment_method",
+      "triggers": {
+        "exact": ["支払方法は？"],
+        "keywords": ["支払い方法", "カード使える", "現金", "電子マネー", "クレジットカード"]
+      },
+      "response": {
+        "text": "お支払いは現金・クレジットカード・各種QR決済に対応しております😊\nご都合の良い方法でご利用いただけますので、安心してご来店ください✨"
+      },
+      "priority": 100,
+      "tags": ["faq", "payment"],
+      "enabled": True
+    },
+
+    {
+      "id": "kb_store_name",
+      "type": "kb",
+      "category": "店舗情報",
+      "intent": "store_name",
+      "triggers": {
+        "exact": [],
+        "keywords": ["店名", "お店の名前", "店舗名", "サロン名", "店の名前", "なんていう店"]
+      },
+      "response": {"text": "{store_name}です。"},
+      "priority": 95,
+      "tags": ["kb", "store"],
+      "enabled": True
+    },
+    {
+      "id": "kb_address",
+      "type": "kb",
+      "category": "店舗情報",
+      "intent": "address",
+      "triggers": {
+        "exact": [],
+        "keywords": ["住所", "場所", "エリア", "どこにある"]
+      },
+      "response": {"text": "{address}"},
+      "priority": 95,
+      "tags": ["kb", "store"],
+      "enabled": True
+    },
+    {
+      "id": "kb_nearest_station",
+      "type": "kb",
+      "category": "店舗情報",
+      "intent": "nearest_station",
+      "triggers": {
+        "exact": [],
+        "keywords": ["最寄り", "最寄り駅", "最寄駅", "何駅"]
+      },
+      "response": {"text": "{nearest_station}です。"},
+      "priority": 95,
+      "tags": ["kb", "access"],
+      "enabled": True
+    },
+    {
+      "id": "kb_access",
+      "type": "kb",
+      "category": "店舗情報",
+      "intent": "access",
+      "triggers": {
+        "exact": [],
+        "keywords": ["アクセス", "行き方", "どうやって行く", "どうやって行けばいい", "駅からどう行く"]
+      },
+      "response": {"text": "{access}"},
+      "priority": 95,
+      "tags": ["kb", "access"],
+      "enabled": True
+    },
+    {
+      "id": "kb_phone",
+      "type": "kb",
+      "category": "店舗情報",
+      "intent": "phone",
+      "triggers": {
+        "exact": [],
+        "keywords": ["電話番号", "連絡先", "電話"]
+      },
+      "response": {"text": "{phone}"},
+      "priority": 95,
+      "tags": ["kb", "contact"],
+      "enabled": True
+    },
+    {
+      "id": "kb_sns",
+      "type": "kb",
+      "category": "店舗情報",
+      "intent": "sns",
+      "triggers": {
+        "exact": [],
+        "keywords": ["SNS", "インスタ", "Instagram", "インスタグラム"]
+      },
+      "response": {"text": "{sns}"},
+      "priority": 90,
+      "tags": ["kb", "contact"],
+      "enabled": True
+    },
+    {
+      "id": "kb_parking",
+      "type": "kb",
+      "category": "設備",
+      "intent": "parking",
+      "triggers": {
+        "exact": [],
+        "keywords": ["駐車場", "車", "車で行ける"]
+      },
+      "response": {"text": "{parking}"},
+      "priority": 90,
+      "tags": ["kb", "facility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_bicycle",
+      "type": "kb",
+      "category": "設備",
+      "intent": "bicycle",
+      "triggers": {
+        "exact": [],
+        "keywords": ["駐輪場", "自転車", "自転車置ける"]
+      },
+      "response": {"text": "{bicycle}"},
+      "priority": 90,
+      "tags": ["kb", "facility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_hours",
+      "type": "kb",
+      "category": "営業時間",
+      "intent": "hours",
+      "triggers": {
+        "exact": [],
+        "keywords": ["営業時間", "何時から何時まで", "何時まで", "空いてる時間"]
+      },
+      "response": {"text": "{hours}"},
+      "priority": 95,
+      "tags": ["kb", "hours"],
+      "enabled": True
+    },
+    {
+      "id": "kb_last_reception",
+      "type": "kb",
+      "category": "営業時間",
+      "intent": "last_reception",
+      "triggers": {
+        "exact": [],
+        "keywords": ["最終受付", "何時まで受付", "受付終了"]
+      },
+      "response": {"text": "最終受付はメニューによって異なります。詳細はサービスメニューをご覧ください。"},
+      "priority": 90,
+      "tags": ["kb", "hours"],
+      "enabled": True
+    },
+    {
+      "id": "kb_closed_days",
+      "type": "kb",
+      "category": "営業時間",
+      "intent": "closed_days",
+      "triggers": {
+        "exact": [],
+        "keywords": ["定休日", "休み", "店休日"]
+      },
+      "response": {"text": "{closed_days}"},
+      "priority": 90,
+      "tags": ["kb", "hours"],
+      "enabled": True
+    },
+    {
+      "id": "kb_holiday_season",
+      "type": "kb",
+      "category": "営業時間",
+      "intent": "holiday_season",
+      "triggers": {
+        "exact": [],
+        "keywords": ["お盆", "年末年始", "連休", "年末", "正月"]
+      },
+      "response": {"text": "{holiday_season}"},
+      "priority": 80,
+      "tags": ["kb", "hours"],
+      "enabled": True
+    },
+    {
+      "id": "kb_busy_time",
+      "type": "kb",
+      "category": "混雑",
+      "intent": "busy_time",
+      "triggers": {
+        "exact": [],
+        "keywords": ["混む時間", "いつ混む", "混雑", "混んでる時間"]
+      },
+      "response": {"text": "土日や夕方は混みやすくなっております。ご希望のお時間がある場合は、お早めのご予約がおすすめです。"},
+      "priority": 85,
+      "tags": ["kb", "crowd"],
+      "enabled": True
+    },
+    {
+      "id": "kb_reservation_recommended",
+      "type": "kb",
+      "category": "予約",
+      "intent": "reservation_recommended",
+      "triggers": {
+        "exact": [],
+        "keywords": ["予約いる", "予約必要", "予約した方がいい", "予約必須", "予約したいんだけど"]
+      },
+      "response": {"text": "スムーズなご案内のため、事前のご予約をおすすめしております。ご予約は公式LINEから承っております。"},
+      "priority": 90,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_reservation_method",
+      "type": "kb",
+      "category": "予約",
+      "intent": "reservation_method",
+      "triggers": {
+        "exact": [],
+        "keywords": ["予約方法", "どうやって予約", "予約したい", "予約の取り方"]
+      },
+      "response": {"text": "ご予約は公式LINEから承っております。メニューからご案内いたします。"},
+      "priority": 90,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_same_day_reservation",
+      "type": "kb",
+      "category": "予約",
+      "intent": "same_day_reservation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["当日予約", "今日いける", "今日予約できる", "今から行ける"]
+      },
+      "response": {"text": "空きがあれば当日のご予約も可能です。"},
+      "priority": 92,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_reservation_change",
+      "type": "kb",
+      "category": "予約",
+      "intent": "reservation_change",
+      "triggers": {
+        "exact": [],
+        "keywords": ["変更できる", "予約変更", "日時変更", "予約変えたい"]
+      },
+      "response": {"text": "前日までであればご予約の変更が可能です。変更をご希望の場合は、お早めにご連絡ください。"},
+      "priority": 92,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_cancellation",
+      "type": "kb",
+      "category": "予約",
+      "intent": "cancellation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["キャンセルできる", "キャンセル", "キャンセル料", "キャンセル規定", "予約取り消し"]
+      },
+      "response": {"text": "前日までであればキャンセル可能です。ご都合が変わった際は、分かった時点でご連絡いただけますと助かります"},
+      "priority": 92,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_late_arrival",
+      "type": "kb",
+      "category": "予約",
+      "intent": "late_arrival",
+      "triggers": {
+        "exact": [],
+        "keywords": ["遅れそう", "遅刻", "間に合わない", "遅れたらどうなる"]
+      },
+      "response": {"text": "遅れる場合は事前にご連絡をお願いいたします。状況により施術時間が短くなる場合がございます。"},
+      "priority": 92,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_out_of_hours",
+      "type": "kb",
+      "category": "予約",
+      "intent": "out_of_hours",
+      "triggers": {
+        "exact": [],
+        "keywords": ["営業時間外対応", "時間外", "早朝", "夜遅く"]
+      },
+      "response": {"text": "営業時間外のご対応は原則不可です。イベント等の特別対応は、別料金・事前相談となります。"},
+      "priority": 85,
+      "tags": ["kb", "reservation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_menu_overview",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "menu_overview",
+      "triggers": {
+        "exact": [],
+        "keywords": ["メニュー", "どんなメニュー", "何がある", "メニュー一覧"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 90,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_popular_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "popular_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["人気メニュー", "おすすめメニュー", "一番人気", "人気No.1"]
+      },
+      "response": {"text": "一番人気は『カット＋カラー＋トリートメント』です。迷われている方にも選ばれやすい定番メニューです。"},
+      "priority": 88,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_menu_consultation",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "menu_consultation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["メニュー決まってない", "相談できる", "メニュー未定", "相談して決めたい"]
+      },
+      "response": {"text": "もちろん可能です。ご来店後にご希望やお悩みを伺いながら、合うメニューをご提案いたします。まずはご希望日時だけでもお気軽にご予約ください。"},
+      "priority": 88,
+      "tags": ["kb", "menu", "consultation"],
+      "enabled": True
+    },
+    {
+      "id": "kb_treatment_time",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "treatment_time",
+      "triggers": {
+        "exact": [],
+        "keywords": ["施術時間", "どれくらいかかる", "所要時間", "時間どのくらい"]
+      },
+      "response": {"text": "施術時間はメニューによって異なります。詳細はサービスメニューをご覧ください。"},
+      "priority": 88,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_first_visit",
+      "type": "kb",
+      "category": "接客",
+      "intent": "first_visit",
+      "triggers": {
+        "exact": [],
+        "keywords": ["初めて", "初回", "流れ", "初めてでも大丈夫"]
+      },
+      "response": {"text": "初めての方もご安心ください。ご来店後にカウンセリングを行い、ご希望を伺ってから施術に入ります。"},
+      "priority": 88,
+      "tags": ["kb", "service"],
+      "enabled": True
+    },
+    {
+      "id": "kb_concern_consultation",
+      "type": "kb",
+      "category": "接客",
+      "intent": "concern_consultation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["悩み相談", "くせ毛", "ダメージ", "髪の悩み", "相談したい"]
+      },
+      "response": {"text": "髪質やお悩みに合わせてご提案いたします。お悩みがある場合は、カウンセリング時に遠慮なくご相談ください。"},
+      "priority": 85,
+      "tags": ["kb", "service"],
+      "enabled": True
+    },
+    {
+      "id": "kb_bleach_consultation",
+      "type": "kb",
+      "category": "施術可否",
+      "intent": "bleach_consultation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["ブリーチできる", "できない施術ある", "施術できるか", "この髪でできる"]
+      },
+      "response": {"text": "髪の状態によっては、ご希望の施術ができない場合がございます。無理のない範囲で、できる限り最適なご提案をいたします。"},
+      "priority": 84,
+      "tags": ["kb", "service"],
+      "enabled": True
+    },
+
+    {
+      "id": "kb_cut_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "cut_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["カット", "前髪カット", "メンテナンスカット", "学生カット", "スクールカット"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_kids_cut",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "kids_cut",
+      "triggers": {
+        "exact": [],
+        "keywords": ["キッズカット", "子供カット", "お子様カット"]
+      },
+      "response": {"text": "キッズ向けのご案内も可能です。詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_color_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "color_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["カラー", "リタッチ", "フルカラー", "グレイカラー", "白髪染め", "ケアブリーチ", "ダブルカラー", "ハイライト", "ローライト", "インナーカラー", "イヤリングカラー", "バレイヤージュ", "グラデーションカラー"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_perm_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "perm_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["パーマ", "コールドパーマ", "デジタルパーマ", "水パーマ", "スパイラルパーマ", "ツイストパーマ", "ツイストスパイラル", "波巻きパーマ", "ニュアンスパーマ"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_straight_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "straight_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["縮毛矯正", "ストレートパーマ", "ストパ", "酸性ストレート", "前髪縮毛矯正", "部分縮毛矯正"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_treatment_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "treatment_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["トリートメント", "クイックトリートメント", "内部補修トリートメント", "システムトリートメント", "髪質改善トリートメント", "酸熱トリートメント"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_headspa_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "headspa_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["ヘッドスパ", "クイックスパ", "炭酸ヘッドスパ", "エイジングケアスパ"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_set_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "set_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["ヘアセット", "セット", "アップスタイル", "巻き髪", "ブロー", "スタイリング"]
+      },
+      "response": {"text": "詳細はサービスメニューからご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_shampoo_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "shampoo_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["シャンプー", "炭酸シャンプー", "頭皮ケア", "スカルプケア"]
+      },
+      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_mens_menu",
+      "type": "kb",
+      "category": "メニュー",
+      "intent": "mens_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["メンズカット", "メンズパーマ", "フェードカット", "眉カット"]
+      },
+      "response": {"text": "メンズ向けメニューもご用意しております。詳細はサービスメニューをご確認ください。"},
+      "priority": 82,
+      "tags": ["kb", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "kb_staff_info",
+      "type": "kb",
+      "category": "スタッフ",
+      "intent": "staff_info",
+      "triggers": {
+        "exact": [],
+        "keywords": ["スタッフ", "スタイリスト", "担当者", "誰がいる"]
+      },
+      "response": {"text": "スタッフの詳細はスタッフ紹介をご覧ください。"},
+      "priority": 85,
+      "tags": ["kb", "staff"],
+      "enabled": True
+    },
+    {
+      "id": "kb_nomination_available",
+      "type": "kb",
+      "category": "スタッフ",
+      "intent": "nomination_available",
+      "triggers": {
+        "exact": [],
+        "keywords": ["指名できる", "担当選べる", "指名したい"]
+      },
+      "response": {"text": "ご指名可能です"},
+      "priority": 85,
+      "tags": ["kb", "staff"],
+      "enabled": True
+    },
+    {
+      "id": "kb_nomination_fee",
+      "type": "kb",
+      "category": "スタッフ",
+      "intent": "nomination_fee",
+      "triggers": {
+        "exact": [],
+        "keywords": ["指名料", "指名料金"]
+      },
+      "response": {"text": "{nomination_fee}"},
+      "priority": 85,
+      "tags": ["kb", "staff"],
+      "enabled": True
+    },
+    {
+      "id": "kb_no_preference",
+      "type": "kb",
+      "category": "スタッフ",
+      "intent": "no_preference",
+      "triggers": {
+        "exact": [],
+        "keywords": ["指名なし", "おまかせ", "担当こだわりない"]
+      },
+      "response": {"text": "指名なしでも大丈夫です。お店側で最適なスタイリストをご案内いたします。"},
+      "priority": 85,
+      "tags": ["kb", "staff"],
+      "enabled": True
+    },
+    {
+      "id": "kb_price",
+      "type": "kb",
+      "category": "料金",
+      "intent": "price",
+      "triggers": {
+        "exact": [],
+        "keywords": ["料金", "値段", "いくら", "金額"]
+      },
+      "response": {"text": "料金はメニューにより異なります。詳細はサービスメニューをご確認ください。"},
+      "priority": 90,
+      "tags": ["kb", "price"],
+      "enabled": True
+    },
+    {
+      "id": "kb_extra_fee",
+      "type": "kb",
+      "category": "料金",
+      "intent": "extra_fee",
+      "triggers": {
+        "exact": [],
+        "keywords": ["追加料金", "プラス料金", "追加でかかる"]
+      },
+      "response": {"text": "髪の長さ・ブリーチ回数・薬剤使用量によって追加料金が発生する場合がございます。事前にご案内いたします。"},
+      "priority": 85,
+      "tags": ["kb", "price"],
+      "enabled": True
+    },
+    {
+      "id": "kb_payment",
+      "type": "kb",
+      "category": "料金",
+      "intent": "payment",
+      "triggers": {
+        "exact": [],
+        "keywords": ["支払い方法", "カード使える", "現金", "電子マネー", "クレジットカード"]
+      },
+      "response": {"text": "現金、各種クレジットカード、各種電子マネーをご利用いただけます。"},
+      "priority": 90,
+      "tags": ["kb", "payment"],
+      "enabled": True
+    },
+    {
+      "id": "kb_receipt",
+      "type": "kb",
+      "category": "料金",
+      "intent": "receipt",
+      "triggers": {
+        "exact": [],
+        "keywords": ["領収書", "レシート", "領収証"]
+      },
+      "response": {"text": "領収書の発行が可能です。"},
+      "priority": 85,
+      "tags": ["kb", "payment"],
+      "enabled": True
+    },
+    {
+      "id": "kb_gender_ok",
+      "type": "kb",
+      "category": "利用可否",
+      "intent": "gender_ok",
+      "triggers": {
+        "exact": [],
+        "keywords": ["メンズOK", "男いける", "女性専用", "女性のみ", "男性でも大丈夫"]
+      },
+      "response": {"text": "男性・女性どちらのお客様もご利用いただけます。"},
+      "priority": 85,
+      "tags": ["kb", "eligibility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_child_ok",
+      "type": "kb",
+      "category": "利用可否",
+      "intent": "child_ok",
+      "triggers": {
+        "exact": [],
+        "keywords": ["子供OK", "子供いける", "お子様OK", "子連れ", "子ども連れ"]
+      },
+      "response": {"text": "お子様のご来店も可能です。"},
+      "priority": 85,
+      "tags": ["kb", "eligibility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_pregnancy",
+      "type": "kb",
+      "category": "利用可否",
+      "intent": "pregnancy",
+      "triggers": {
+        "exact": [],
+        "keywords": ["妊娠中対応", "妊娠中", "妊婦", "妊娠してても大丈夫"]
+      },
+      "response": {"text": "体調と医師の指示を優先し、無理のない範囲でご案内いたします。当日も遠慮なくご相談ください。"},
+      "priority": 84,
+      "tags": ["kb", "eligibility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_companion",
+      "type": "kb",
+      "category": "利用可否",
+      "intent": "companion",
+      "triggers": {
+        "exact": [],
+        "keywords": ["一緒に行ける", "同伴", "付き添い", "付き添いあり"]
+      },
+      "response": {"text": "付き添いの方のご来店も可能です。"},
+      "priority": 84,
+      "tags": ["kb", "eligibility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_wifi",
+      "type": "kb",
+      "category": "設備",
+      "intent": "wifi",
+      "triggers": {
+        "exact": [],
+        "keywords": ["wifi", "Wi-Fi", "ネット使える", "ネット"]
+      },
+      "response": {"text": "Wi-Fiをご利用いただけます。"},
+      "priority": 84,
+      "tags": ["kb", "facility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_outlet",
+      "type": "kb",
+      "category": "設備",
+      "intent": "outlet",
+      "triggers": {
+        "exact": [],
+        "keywords": ["コンセント", "充電", "充電できる"]
+      },
+      "response": {"text": "コンセントのご利用も可能です。"},
+      "priority": 84,
+      "tags": ["kb", "facility"],
+      "enabled": True
+    },
+    {
+      "id": "kb_new_customer_coupon",
+      "type": "kb",
+      "category": "特典",
+      "intent": "new_customer_coupon",
+      "triggers": {
+        "exact": [],
+        "keywords": ["新規クーポン", "初回クーポン", "初回割引"]
+      },
+      "response": {"text": "{new_customer_coupon}"},
+      "priority": 85,
+      "tags": ["kb", "benefit"],
+      "enabled": True
+    },
+    {
+      "id": "kb_revisit_benefit",
+      "type": "kb",
+      "category": "特典",
+      "intent": "revisit_benefit",
+      "triggers": {
+        "exact": [],
+        "keywords": ["再来特典", "再来クーポン", "2回目特典"]
+      },
+      "response": {"text": "来店30日以内の再来で、トリートメント¥1,000OFFとなります。"},
+      "priority": 85,
+      "tags": ["kb", "benefit"],
+      "enabled": True
+    },
+    {
+      "id": "kb_birthday_benefit",
+      "type": "kb",
+      "category": "特典",
+      "intent": "birthday_benefit",
+      "triggers": {
+        "exact": [],
+        "keywords": ["誕生日特典", "誕生月特典", "バースデー特典"]
+      },
+      "response": {"text": "誕生月は施術料金5％OFFです。身分証不要で、月1回までご利用いただけます。"},
+      "priority": 85,
+      "tags": ["kb", "benefit"],
+      "enabled": True
+    },
+    {
+      "id": "kb_referral_benefit",
+      "type": "kb",
+      "category": "特典",
+      "intent": "referral_benefit",
+      "triggers": {
+        "exact": [],
+        "keywords": ["紹介割", "紹介特典", "友達紹介"]
+      },
+      "response": {"text": "紹介者・被紹介者ともに¥500OFFです。同時使用は不可となります。"},
+      "priority": 85,
+      "tags": ["kb", "benefit"],
+      "enabled": True
+    },
+    {
+      "id": "kb_points",
+      "type": "kb",
+      "category": "特典",
+      "intent": "points",
+      "triggers": {
+        "exact": [],
+        "keywords": ["ポイント", "ショップカード", "LINEポイント"]
+      },
+      "response": {"text": "LINEショップカードをご利用いただけます。来店1回で1pt、5ptで¥1,000OFFです。"},
+      "priority": 85,
+      "tags": ["kb", "benefit"],
+      "enabled": True
+    },
+    {
+      "id": "kb_allergy",
+      "type": "kb",
+      "category": "施術方針",
+      "intent": "allergy",
+      "triggers": {
+        "exact": [],
+        "keywords": ["アレルギー対応", "アレルギー", "薬剤心配", "肌弱い"]
+      },
+      "response": {"text": "パッチテストや薬剤調整をご提案いたします。無理な施術は行わない方針です。"},
+      "priority": 84,
+      "tags": ["kb", "policy"],
+      "enabled": True
+    },
+    {
+      "id": "kb_bring_own_chemicals",
+      "type": "kb",
+      "category": "施術方針",
+      "intent": "bring_own_chemicals",
+      "triggers": {
+        "exact": [],
+        "keywords": ["持ち込み薬剤", "薬剤持ち込み", "持ち込み"]
+      },
+      "response": {"text": "衛生・品質管理上、薬剤のお持ち込みは原則お断りしております。"},
+      "priority": 84,
+      "tags": ["kb", "policy"],
+      "enabled": True
+    },
+    {
+      "id": "kb_guarantee",
+      "type": "kb",
+      "category": "施術方針",
+      "intent": "guarantee",
+      "triggers": {
+        "exact": [],
+        "keywords": ["仕上がり保証", "お直し", "やり直し"]
+      },
+      "response": {"text": "7日以内は無償でお直しのご相談が可能です。なお、大幅なデザイン変更は対象外となります。"},
+      "priority": 84,
+      "tags": ["kb", "policy"],
+      "enabled": True
+    },
+
+    {
+      "id": "sales_menu_undecided",
+      "type": "sales",
+      "category": "売上導線",
+      "intent": "menu_undecided",
+      "triggers": {
+        "exact": [],
+        "keywords": ["メニュー決まってない時の返し", "メニュー未定案内", "迷っている人への返し"]
+      },
+      "response": {
+        "text": "メニューが決まっていなくても問題ありません。ご来店後に髪の状態やご希望を伺いながら、合うメニューをご提案できます。",
+        "cta": "まずはご希望日時でご予約いただくとスムーズです。"
+      },
+      "priority": 70,
+      "tags": ["sales", "menu"],
+      "enabled": True
+    },
+    {
+      "id": "sales_first_visit_anxiety",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "first_visit_anxiety",
+      "triggers": {
+        "exact": [],
+        "keywords": ["初回不安の返し", "初めての人への案内", "初来店の不安解消"]
+      },
+      "response": {
+        "text": "初めての方にも安心してご来店いただけるよう、施術前にしっかりカウンセリングを行っております。",
+        "cta": "ご不安な点がある場合も、事前にご相談いただけます。"
+      },
+      "priority": 70,
+      "tags": ["sales", "anxiety"],
+      "enabled": True
+    },
+    {
+      "id": "sales_price_anxiety",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "price_anxiety",
+      "triggers": {
+        "exact": [],
+        "keywords": ["料金不安の返し", "値段が不安な人への案内", "価格不安解消"]
+      },
+      "response": {
+        "text": "料金面が気になる方にも、事前に内容をご確認いただきながらご案内しております。",
+        "cta": "迷われている場合は、無理のない範囲で合うメニューをご提案いたします。"
+      },
+      "priority": 70,
+      "tags": ["sales", "anxiety", "price"],
+      "enabled": True
+    },
+    {
+      "id": "sales_time_anxiety",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "time_anxiety",
+      "triggers": {
+        "exact": [],
+        "keywords": ["時間不安の返し", "施術時間が不安な人への案内", "所要時間不安解消"]
+      },
+      "response": {
+        "text": "ご予定がある方にも安心していただけるよう、施術時間の目安をご案内しながら進められます。",
+        "cta": "気になる場合は、予約前に遠慮なくご相談ください。"
+      },
+      "priority": 70,
+      "tags": ["sales", "anxiety", "time"],
+      "enabled": True
+    },
+    {
+      "id": "sales_finish_anxiety",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "finish_anxiety",
+      "triggers": {
+        "exact": [],
+        "keywords": ["仕上がり不安の返し", "失敗不安の返し", "仕上がりが不安な人への案内"]
+      },
+      "response": {
+        "text": "仕上がりのイメージに不安がある方にも、事前のカウンセリングでご希望をしっかり確認しながらご提案しております。",
+        "cta": "無理に進めることはありませんので、ご安心ください。"
+      },
+      "priority": 70,
+      "tags": ["sales", "anxiety", "finish"],
+      "enabled": True
+    },
+    {
+      "id": "sales_popular_menu_prompt",
+      "type": "sales",
+      "category": "提案",
+      "intent": "popular_menu_prompt",
+      "triggers": {
+        "exact": [],
+        "keywords": ["人気メニュー提案", "おすすめを聞かれた時の返し", "迷う人への定番提案"]
+      },
+      "response": {
+        "text": "迷われている方には、人気の高い定番メニューからご案内することが多いです。",
+        "cta": "ご希望の雰囲気やお悩みに合わせて、選びやすいメニューをご提案できます。"
+      },
+      "priority": 68,
+      "tags": ["sales", "proposal"],
+      "enabled": True
+    },
+    {
+      "id": "sales_consultation_cta",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "consultation_cta",
+      "triggers": {
+        "exact": [],
+        "keywords": ["相談予約導線", "まず予約を促す返し", "迷っている人への予約誘導"]
+      },
+      "response": {
+        "text": "メニューが未定でもご予約は可能です。",
+        "cta": "まずはご希望のお日にち・お時間で枠を押さえていただくと、その後のご案内がスムーズです。"
+      },
+      "priority": 68,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    },
+    {
+      "id": "sales_same_day_cta",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "same_day_cta",
+      "triggers": {
+        "exact": [],
+        "keywords": ["当日予約導線", "今日行きたい人への返し", "今から行きたい人への案内"]
+      },
+      "response": {
+        "text": "当日でも空きがあればご案内できる場合があります。",
+        "cta": "ご希望のお時間がある場合は、できるだけ早めにご連絡いただくのがおすすめです。"
+      },
+      "priority": 68,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    },
+    {
+      "id": "sales_no_nomination_relief",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "no_nomination_relief",
+      "triggers": {
+        "exact": [],
+        "keywords": ["指名なし不安の返し", "担当未定の人への案内", "指名なし安心案内"]
+      },
+      "response": {
+        "text": "担当のご希望が決まっていない場合でも問題ありません。",
+        "cta": "お悩みやご希望に合わせて、相性の良いスタイリストをご案内できます。"
+      },
+      "priority": 68,
+      "tags": ["sales", "anxiety", "staff"],
+      "enabled": True
+    },
+    {
+      "id": "sales_booking_hesitation",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "booking_hesitation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["予約迷い中の背中押し", "迷っている人への一押し", "予約を後押しする返し"]
+      },
+      "response": {
+        "text": "迷われている場合でも、先にご希望日時を押さえておくと安心です。",
+        "cta": "枠には限りがありますので、気になるタイミングがある場合は早めのご予約がおすすめです。"
+      },
+      "priority": 68,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    },
+    {
+      "id": "sales_natural_close_general",
+      "type": "sales",
+      "category": "締め文",
+      "intent": "natural_close_general",
+      "triggers": {
+        "exact": [],
+        "keywords": ["自然な締め文", "自然な予約導線", "汎用クロージング"]
+      },
+      "response": {
+        "text": "ご希望の日時がございましたら、そのままご予約もご案内できます。"
+      },
+      "priority": 60,
+      "tags": ["sales", "close"],
+      "enabled": True
+    },
+    {
+      "id": "sales_natural_close_consult",
+      "type": "sales",
+      "category": "締め文",
+      "intent": "natural_close_consult",
+      "triggers": {
+        "exact": [],
+        "keywords": ["相談系締め文", "メニュー未定向け締め文", "カウンセリング誘導"]
+      },
+      "response": {
+        "text": "迷われている場合は、ご来店後のご相談前提でのご予約でも大丈夫です。"
+      },
+      "priority": 60,
+      "tags": ["sales", "close"],
+      "enabled": True
+    },
+    {
+      "id": "sales_natural_close_early",
+      "type": "sales",
+      "category": "締め文",
+      "intent": "natural_close_early",
+      "triggers": {
+        "exact": [],
+        "keywords": ["早め予約誘導", "混雑時の締め文", "枠確保の案内"]
+      },
+      "response": {
+        "text": "ご希望の時間がある場合は、早めにご予約いただくと取りやすくなります。"
+      },
+      "priority": 60,
+      "tags": ["sales", "close"],
+      "enabled": True
+    },
+    {
+      "id": "sales_upsell_treatment_soft",
+      "type": "sales",
+      "category": "単価アップ",
+      "intent": "upsell_treatment_soft",
+      "triggers": {
+        "exact": [],
+        "keywords": ["トリートメント提案", "自然な追加提案", "ケア提案"]
+      },
+      "response": {
+        "text": "仕上がりのまとまりや手触りを重視される方には、ケア系メニューを一緒に選ばれることも多いです。",
+        "cta": "必要に応じて無理のない範囲でご提案できます。"
+      },
+      "priority": 66,
+      "tags": ["sales", "upsell"],
+      "enabled": True
+    },
+    {
+      "id": "sales_upsell_color_care",
+      "type": "sales",
+      "category": "単価アップ",
+      "intent": "upsell_color_care",
+      "triggers": {
+        "exact": [],
+        "keywords": ["カラー時ケア提案", "カラー単価アップ提案", "カラー不安への追加提案"]
+      },
+      "response": {
+        "text": "カラーをご検討の方には、仕上がりやダメージ面を気にされてケアメニューを一緒に選ばれる方もいらっしゃいます。",
+        "cta": "ご希望に合わせてご案内可能です。"
+      },
+      "priority": 66,
+      "tags": ["sales", "upsell", "color"],
+      "enabled": True
+    },
+    {
+      "id": "sales_upsell_perm_care",
+      "type": "sales",
+      "category": "単価アップ",
+      "intent": "upsell_perm_care",
+      "triggers": {
+        "exact": [],
+        "keywords": ["パーマ時ケア提案", "パーマ単価アップ提案", "パーマ不安への追加提案"]
+      },
+      "response": {
+        "text": "パーマをご希望の方には、扱いやすさや仕上がりを重視してケアメニューを組み合わせる方もいらっしゃいます。",
+        "cta": "必要に応じてご相談いただけます。"
+      },
+      "priority": 66,
+      "tags": ["sales", "upsell", "perm"],
+      "enabled": True
+    },
+    {
+      "id": "sales_repeat_motivation",
+      "type": "sales",
+      "category": "再来促進",
+      "intent": "repeat_motivation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["再来促進の返し", "次回予約につなげる文", "継続来店の案内"]
+      },
+      "response": {
+        "text": "きれいな状態を保ちやすいタイミングでのご来店をご希望の方も多いため、次回の目安も含めてご案内できます。"
+      },
+      "priority": 64,
+      "tags": ["sales", "repeat"],
+      "enabled": True
+    },
+    {
+      "id": "sales_new_customer_relief",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "new_customer_relief",
+      "triggers": {
+        "exact": [],
+        "keywords": ["新規向け安心訴求", "初回向け安心案内", "新規獲得用の返し"]
+      },
+      "response": {
+        "text": "初めての美容室で緊張される方にも安心していただけるよう、無理のないご提案を大切にしています。",
+        "cta": "気になることは小さなことでもご相談ください。"
+      },
+      "priority": 66,
+      "tags": ["sales", "anxiety"],
+      "enabled": True
+    },
+    {
+      "id": "sales_waiting_mitigation",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "waiting_mitigation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["待ち時間不安の返し", "混雑不安の返し", "待たされる不安解消"]
+      },
+      "response": {
+        "text": "混雑が気になる方にも、できるだけスムーズにご案内できるようご予約をおすすめしております。",
+        "cta": "ご希望時間がある場合は、事前予約が安心です。"
+      },
+      "priority": 66,
+      "tags": ["sales", "anxiety"],
+      "enabled": True
+    },
+    {
+      "id": "sales_mens_relief",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "mens_relief",
+      "triggers": {
+        "exact": [],
+        "keywords": ["男性向け安心訴求", "メンズ不安解消", "男でも大丈夫への返し補強"]
+      },
+      "response": {
+        "text": "男性のお客様もご利用されておりますので、初めての方でも安心してご相談いただけます。"
+      },
+      "priority": 64,
+      "tags": ["sales", "anxiety"],
+      "enabled": True
+    },
+    {
+      "id": "sales_family_relief",
+      "type": "sales",
+      "category": "不安解消",
+      "intent": "family_relief",
+      "triggers": {
+        "exact": [],
+        "keywords": ["子連れ安心訴求", "家族利用安心訴求", "付き添い安心訴求"]
+      },
+      "response": {
+        "text": "ご家族でのご来店や付き添いが気になる方にも、事前にご相談いただければスムーズにご案内しやすくなります。"
+      },
+      "priority": 64,
+      "tags": ["sales", "anxiety"],
+      "enabled": True
+    },
+    {
+      "id": "sales_consult_first_then_menu",
+      "type": "sales",
+      "category": "提案",
+      "intent": "consult_first_then_menu",
+      "triggers": {
+        "exact": [],
+        "keywords": ["悩み優先提案", "メニューより悩みを聞く返し", "相談ベース提案"]
+      },
+      "response": {
+        "text": "メニュー名がまだ決まっていなくても、お悩みやなりたい雰囲気から考える形で問題ありません。",
+        "cta": "内容に合わせてご提案できます。"
+      },
+      "priority": 66,
+      "tags": ["sales", "proposal"],
+      "enabled": True
+    },
+    {
+      "id": "sales_soft_commitment",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "soft_commitment",
+      "triggers": {
+        "exact": [],
+        "keywords": ["柔らかい予約促進", "押しすぎないクロージング", "自然な来店促進"]
+      },
+      "response": {
+        "text": "ご都合の合うお日にちがあれば、そのままご案内できますので、お気軽にお知らせください。"
+      },
+      "priority": 62,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    },
+    {
+      "id": "sales_high_intent_close",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "high_intent_close",
+      "triggers": {
+        "exact": [],
+        "keywords": ["高温度客クロージング", "予約意思高めへの返し", "今すぐ予約導線"]
+      },
+      "response": {
+        "text": "ご希望が固まっているようでしたら、そのままご予約までご案内可能です。"
+      },
+      "priority": 62,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    },
+    {
+      "id": "sales_lost_prevention",
+      "type": "sales",
+      "category": "離脱防止",
+      "intent": "lost_prevention",
+      "triggers": {
+        "exact": [],
+        "keywords": ["離脱防止文", "比較検討中の人への返し", "保留しそうな人への返し"]
+      },
+      "response": {
+        "text": "まだご検討中でも大丈夫です。",
+        "cta": "気になる点を解消しながらご案内できますので、必要なことがあればそのままご相談ください。"
+      },
+      "priority": 62,
+      "tags": ["sales", "retention"],
+      "enabled": True
+    },
+    {
+      "id": "sales_popular_time_prompt",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "popular_time_prompt",
+      "triggers": {
+        "exact": [],
+        "keywords": ["人気時間帯の案内", "時間帯で予約促進", "時間枠訴求"]
+      },
+      "response": {
+        "text": "ご希望が集中しやすい時間帯は早めに埋まりやすいため、候補がお決まりの場合はお早めのご予約がおすすめです。"
+      },
+      "priority": 62,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    },
+    {
+      "id": "sales_finish_with_support",
+      "type": "sales",
+      "category": "締め文",
+      "intent": "finish_with_support",
+      "triggers": {
+        "exact": [],
+        "keywords": ["サポート感ある締め文", "丁寧な締め文", "安心感を残す締め文"]
+      },
+      "response": {
+        "text": "気になることがあればご相談だけでも大丈夫ですので、どうぞお気軽にお知らせください。"
+      },
+      "priority": 60,
+      "tags": ["sales", "close"],
+      "enabled": True
+    },
+    {
+      "id": "sales_menu_popularity_for_indecisive",
+      "type": "sales",
+      "category": "提案",
+      "intent": "menu_popularity_for_indecisive",
+      "triggers": {
+        "exact": [],
+        "keywords": ["優柔不断向け提案", "迷う人向け定番提案", "選べない人向け提案"]
+      },
+      "response": {
+        "text": "どれにするか迷われる方には、人気の高い定番メニューからご案内することが多いです。",
+        "cta": "ご希望に合わせて選びやすい形でご提案できます。"
+      },
+      "priority": 66,
+      "tags": ["sales", "proposal"],
+      "enabled": True
+    },
+    {
+      "id": "sales_care_value_explanation",
+      "type": "sales",
+      "category": "単価アップ",
+      "intent": "care_value_explanation",
+      "triggers": {
+        "exact": [],
+        "keywords": ["ケア価値訴求", "トリートメント価値訴求", "追加メニューの価値説明"]
+      },
+      "response": {
+        "text": "ケア系メニューは、仕上がりの手触りやまとまりを重視したい方に選ばれやすいです。",
+        "cta": "必要な場合のみご案内いたします。"
+      },
+      "priority": 64,
+      "tags": ["sales", "upsell"],
+      "enabled": True
+    },
+    {
+      "id": "sales_booking_after_question",
+      "type": "sales",
+      "category": "予約導線",
+      "intent": "booking_after_question",
+      "triggers": {
+        "exact": [],
+        "keywords": ["回答後予約導線", "説明後の自然な誘導", "FAQ後の予約促進"]
+      },
+      "response": {
+        "text": "ご希望の日時がありましたら、そのままご予約の流れをご案内できます。"
+      },
+      "priority": 62,
+      "tags": ["sales", "cta"],
+      "enabled": True
+    }
+  ]
+}
+
+path = "/mnt/data/unified_kb.json"
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+
+print(path)
+print(f"entries={len(data['entries'])}")
