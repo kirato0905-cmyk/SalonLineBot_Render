@@ -1,5 +1,3 @@
-import os
-import json
 import logging
 from linebot.v3.messaging import (
     TemplateMessage,
@@ -12,38 +10,111 @@ from linebot.v3.messaging import (
     QuickReply,
     QuickReplyItem,
 )
- 
+
+from unified_kb_loader import UnifiedKBLoader
+
+
+def _get_loader() -> UnifiedKBLoader:
+    return UnifiedKBLoader("api/data/unified_kb.json")
+
+
+def _get_faq_display_question(entry: dict) -> str:
+    """
+    FAQ一覧に表示する質問文を取得
+    優先順位:
+    1. triggers.exact の先頭
+    2. intent
+    3. id
+    """
+    if not isinstance(entry, dict):
+        return "よくある質問"
+
+    triggers = entry.get("triggers", {})
+    if isinstance(triggers, dict):
+        exact = triggers.get("exact", [])
+        if isinstance(exact, list) and exact:
+            question = str(exact[0]).strip()
+            if question:
+                return question
+
+    intent = str(entry.get("intent", "")).strip()
+    if intent:
+        return intent
+
+    entry_id = str(entry.get("id", "")).strip()
+    if entry_id:
+        return entry_id
+
+    return "よくある質問"
+
+
+def _find_faq_entry_by_question(faq_entries: list, question: str):
+    """
+    質問文から FAQ entry を探す
+    優先順位:
+    1. triggers.exact 完全一致
+    2. 表示用質問文との一致
+    """
+    if not question or not isinstance(faq_entries, list):
+        return None
+
+    normalized_question = str(question).strip()
+
+    for entry in faq_entries:
+        if not isinstance(entry, dict):
+            continue
+
+        triggers = entry.get("triggers", {})
+        exact = triggers.get("exact", []) if isinstance(triggers, dict) else []
+        if isinstance(exact, list):
+            for q in exact:
+                if str(q).strip() == normalized_question:
+                    return entry
+
+    for entry in faq_entries:
+        if _get_faq_display_question(entry) == normalized_question:
+            return entry
+
+    return None
+
+
 def send_faq_menu(reply_token, configuration):
-    """FAQ一覧をQ1〜Q10形式で1メッセージ表示"""
+    """
+    FAQ一覧をQ1〜Q10形式で1メッセージ表示
+    unified_kb.json の type='faq' を使用
+    """
     try:
-        faq_path = os.path.join(os.path.dirname(__file__), "data", "faq.json")
-        print(f"Loading FAQ from: {faq_path}")
-        
-        if not os.path.exists(faq_path):
-            raise FileNotFoundError(f"FAQ file not found: {faq_path}")
-        
-        with open(faq_path, encoding="utf-8") as f:
-            faq_list = json.load(f)
- 
-        if not faq_list or len(faq_list) == 0:
+        loader = _get_loader()
+        faq_list = loader.get_faq_entries()[:10]
+
+        if not faq_list:
             raise ValueError("FAQ list is empty")
 
-        faq_list = faq_list[:10]  # 最大10件まで
-        print(f"Loaded {len(faq_list)} FAQ items")
+        lines = [
+            "よくある質問はこちらです✨",
+            "気になる番号をタップしてください！",
+            "",
+            ""
+        ]
 
-        lines = ["よくある質問はこちらです✨", "気になる番号をタップしてください！","",""]
         for idx, faq in enumerate(faq_list, start=1):
-            lines.append(f"Q{idx}. {faq['question']}")
+            lines.append(f"Q{idx}. {_get_faq_display_question(faq)}")
 
         lines.append("")
         lines.append("")
-        lines.append("📩上記以外でも、気になることがあればお気軽にメッセージください！")  
+        lines.append("📩上記以外でも、気になることがあればお気軽にメッセージください！")
         lines.append("そのままご予約もご案内できます✨")
 
-        # Quick Reply: Q1～Q10 (no キャンセル per spec 3-1)
-        qr_items = [QuickReplyItem(action=MessageAction(label=f"Q{i}", text=f"Q{i}")) for i in range(1, len(faq_list) + 1)]
-        faq_menu_message = TextMessage(text="\n".join(lines), quick_reply=QuickReply(items=qr_items) if qr_items else None)
- 
+        qr_items = [
+            QuickReplyItem(action=MessageAction(label=f"Q{i}", text=f"Q{i}"))
+            for i in range(1, len(faq_list) + 1)
+        ]
+
+        faq_menu_message = TextMessage(
+            text="\n".join(lines),
+            quick_reply=QuickReply(items=qr_items) if qr_items else None
+        )
+
         with ApiClient(configuration) as api_client:
             MessagingApi(api_client).reply_message(
                 ReplyMessageRequest(
@@ -51,40 +122,52 @@ def send_faq_menu(reply_token, configuration):
                     messages=[faq_menu_message]
                 )
             )
-        print("FAQ menu sent successfully")
+
+        print(f"FAQ menu sent successfully ({len(faq_list)} items)")
+
     except Exception as e:
         logging.error(f"Error in send_faq_menu: {e}", exc_info=True)
         raise
 
+
 def get_faq_by_number(faq_number):
-    """番号でFAQを取得（Q1形式と数値の両方に対応）"""
+    """
+    番号でFAQを取得（Q1形式のみに対応）
+    unified_kb.json の faq entries を返す
+    """
     try:
-        faq_path = os.path.join(os.path.dirname(__file__), "data", "faq.json")
-        if not os.path.exists(faq_path):
+        if not isinstance(faq_number, str):
             return None
-        
-        with open(faq_path, encoding="utf-8") as f:
-            faq_list = json.load(f)
-        
-        # Q1, Q2 形式
-        if isinstance(faq_number, str) and faq_number.upper().startswith("Q"):
-            try:
-                number = int(faq_number.upper().replace("Q", ""))
-                if 1 <= number <= len(faq_list):
-                    return faq_list[number - 1]
-            except ValueError:
-                return None
-                
+
+        normalized = faq_number.strip().upper()
+        if not normalized.startswith("Q"):
+            return None
+
+        number = int(normalized.replace("Q", ""))
+        loader = _get_loader()
+        faq_list = loader.get_faq_entries()
+
+        if 1 <= number <= len(faq_list):
+            return faq_list[number - 1]
+
         return None
+
     except Exception as e:
         logging.error(f"Error in get_faq_by_number: {e}", exc_info=True)
         return None
 
+
 def send_faq_answer_by_item(reply_token, faq_item, configuration):
-    """FAQアイテム（questionとanswerを含む）から直接回答を送信"""
+    """
+    FAQ item（unified entry）から直接回答を送信
+    """
     try:
-        answer = faq_item.get("answer", "申し訳ありません、その質問は見つかりませんでした。")
-        
+        loader = _get_loader()
+        answer = loader.render_response(faq_item)
+
+        if not answer:
+            answer = "申し訳ありません、その質問は見つかりませんでした。"
+
         back_button = TemplateMessage(
             alt_text="他のよくある質問も見る",
             template=ButtonsTemplate(
@@ -94,7 +177,7 @@ def send_faq_answer_by_item(reply_token, faq_item, configuration):
                 ]
             )
         )
-        
+
         with ApiClient(configuration) as api_client:
             MessagingApi(api_client).reply_message(
                 ReplyMessageRequest(
@@ -102,26 +185,27 @@ def send_faq_answer_by_item(reply_token, faq_item, configuration):
                     messages=[TextMessage(text=answer), back_button]
                 )
             )
-        print(f"FAQ answer sent successfully for question: {faq_item.get('question', 'Unknown')}")
+
+        print(f"FAQ answer sent successfully for question: {_get_faq_display_question(faq_item)}")
+
     except Exception as e:
         logging.error(f"Error in send_faq_answer_by_item: {e}", exc_info=True)
         raise
 
+
 def send_faq_answer(reply_token, question, configuration):
-    """質問文からfaq.jsonを検索して回答を送信"""
+    """
+    質問文から unified_kb.json の FAQ を検索して回答を送信
+    """
     try:
-        faq_path = os.path.join(os.path.dirname(__file__), "data", "faq.json")
-        print(f"Loading FAQ from: {faq_path} for question: {question}")
-        
-        if not os.path.exists(faq_path):
-            raise FileNotFoundError(f"FAQ file not found: {faq_path}")
-        
-        with open(faq_path, encoding="utf-8") as f:
-            faq_list = json.load(f)
-        
-        # Get answer from faq.json by matching question exactly
-        answer = next((faq["answer"] for faq in faq_list if faq["question"] == question), "申し訳ありません、その質問は見つかりませんでした。")
-        
+        loader = _get_loader()
+        faq_list = loader.get_faq_entries()
+        faq_item = _find_faq_entry_by_question(faq_list, question)
+
+        answer = loader.render_response(faq_item) if faq_item else ""
+        if not answer:
+            answer = "申し訳ありません、その質問は見つかりませんでした。"
+
         back_button = TemplateMessage(
             alt_text="他のよくある質問も見る",
             template=ButtonsTemplate(
@@ -131,7 +215,7 @@ def send_faq_answer(reply_token, question, configuration):
                 ]
             )
         )
-        
+
         with ApiClient(configuration) as api_client:
             MessagingApi(api_client).reply_message(
                 ReplyMessageRequest(
@@ -139,7 +223,9 @@ def send_faq_answer(reply_token, question, configuration):
                     messages=[TextMessage(text=answer), back_button]
                 )
             )
+
         print(f"FAQ answer sent successfully for question: {question}")
+
     except Exception as e:
         logging.error(f"Error in send_faq_answer: {e}", exc_info=True)
         raise
