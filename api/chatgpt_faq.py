@@ -12,7 +12,7 @@ from typing import Optional, Any, List, Dict
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from unified_kb_loader import UnifiedKBLoader
+from api.unified_kb_loader import UnifiedKBLoader
 
 
 class ChatGPTFAQ:
