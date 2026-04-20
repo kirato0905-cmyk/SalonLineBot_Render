@@ -266,22 +266,12 @@ def handle_message(event: MessageEvent):
                 return
 
         # FAQ answer by number
-        elif message_text.upper().startswith("Q"):
+        faq_item = get_faq_by_number(message_text)
+        if faq_item:
             try:
-                faq_item = get_faq_by_number(message_text)
-                if faq_item and "answer" in faq_item:
-                    send_faq_answer_by_item(event.reply_token, faq_item, configuration)
-                    print(f"FAQ answer sent successfully for {message_text} to user {user_id}")
-                    return
-                else:
-                    with ApiClient(configuration) as api_client:
-                        MessagingApi(api_client).reply_message(
-                            ReplyMessageRequest(
-                                reply_token=event.reply_token,
-                                messages=[TextMessage(text="申し訳ございませんが、そのFAQ番号は見つかりませんでした。")],
-                            )
-                        )
-                    return
+                send_faq_answer_by_item(event.reply_token, faq_item, configuration)
+                print(f"FAQ answer sent successfully for {message_text} to user {user_id}")
+                return
             except Exception as e:
                 logging.error(f"Failed to handle FAQ input: {e}", exc_info=True)
                 try:
