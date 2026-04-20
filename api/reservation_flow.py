@@ -26,6 +26,12 @@ New:
 - In time selection quick replies, options past the reservation deadline are not shown
 - Deadline-aware filtering reflects settings.json immediately
 - Date buttons also avoid dates that have no selectable time left after deadline filtering
+- Time selection message is dynamically built from actual available quick reply options
+- Revenue-max recommendation scoring:
+  - nearer valid times are prioritized
+  - preferred time ranges from settings.json get bonus
+  - balanced daytime slots get bonus
+  - late slots can receive penalty
 """
 
 import re
@@ -33,7 +39,7 @@ import os
 import json
 import time
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
 from datetime import datetime, timedelta, date
 
 from api.google_calendar import GoogleCalendarHelper
@@ -100,13 +106,17 @@ class ReservationFlow:
             logging.error(f"Failed to load settings data: {e}")
             return {}
 
+    def _reload_settings(self) -> Dict[str, Any]:
+        self.settings_data = self._load_settings_data()
+        return self.settings_data
+
     def _get_reservation_limit_hours(self, rule_key: str, default: int = 2) -> int:
         """
         Reload settings.json every time for immediate reflection.
         Fallback to default when the setting is missing or invalid.
         """
         try:
-            self.settings_data = self._load_settings_data()
+            self._reload_settings()
             reservation_rules = self.settings_data.get("reservation_rules", {})
             value = reservation_rules.get(rule_key, default)
 
@@ -133,6 +143,44 @@ class ReservationFlow:
             logging.warning(
                 f"Invalid reservation rule '{rule_key}'. Using default={default}. error={e}"
             )
+            return default
+
+    def _get_recommendation_rules(self) -> Dict[str, Any]:
+        """
+        Reload settings.json every time for immediate reflection.
+        """
+        try:
+            self._reload_settings()
+            recommendation_rules = self.settings_data.get("recommendation_rules", {})
+            if not isinstance(recommendation_rules, dict):
+                return {}
+            return recommendation_rules
+        except Exception as e:
+            logging.warning(f"Invalid recommendation_rules. error={e}")
+            return {}
+
+    def _get_recommend_count(self, default: int = 2) -> int:
+        try:
+            rules = self._get_recommendation_rules()
+            value = rules.get("recommend_count", default)
+
+            if isinstance(value, bool):
+                return default
+            if isinstance(value, str):
+                value = value.strip()
+                if not value.isdigit():
+                    return default
+                value = int(value)
+            if not isinstance(value, (int, float)):
+                return default
+
+            value = int(value)
+            if value < 1:
+                return default
+            if value > 4:
+                return 4
+            return value
+        except Exception:
             return default
 
     def _check_reservation_deadline(
@@ -249,6 +297,199 @@ class ReservationFlow:
             return f"{end_hour:02d}:{end_minute:02d}"
         except (ValueError, IndexError):
             return start_time
+
+    def _time_to_minutes(self, time_str: str) -> Optional[int]:
+        try:
+            hour, minute = map(int, time_str.split(":"))
+            return hour * 60 + minute
+        except Exception:
+            return None
+
+    def _safe_get_now_tokyo(self):
+        import pytz
+        tokyo_tz = pytz.timezone("Asia/Tokyo")
+        return datetime.now(tokyo_tz)
+
+    def _get_preferred_time_range_bonus(self, start_time: str) -> int:
+        try:
+            rules = self._get_recommendation_rules()
+            ranges = rules.get("preferred_time_ranges", [])
+            if not isinstance(ranges, list):
+                return 0
+
+            target_min = self._time_to_minutes(start_time)
+            if target_min is None:
+                return 0
+
+            bonus = 0
+            for item in ranges:
+                if not isinstance(item, dict):
+                    continue
+                s = item.get("start")
+                e = item.get("end")
+                score = item.get("score", 0)
+
+                start_min = self._time_to_minutes(s) if s else None
+                end_min = self._time_to_minutes(e) if e else None
+
+                if start_min is None or end_min is None:
+                    continue
+
+                if isinstance(score, bool):
+                    continue
+                if isinstance(score, str):
+                    if score.strip().lstrip("-").isdigit():
+                        score = int(score.strip())
+                    else:
+                        continue
+                if not isinstance(score, (int, float)):
+                    continue
+
+                if start_min <= target_min < end_min:
+                    bonus += int(score)
+
+            return bonus
+        except Exception as e:
+            logging.warning(f"Preferred time range bonus error: {e}")
+            return 0
+
+    def _get_daytime_bonus(self, start_time: str) -> int:
+        """
+        Default philosophy:
+        - morning: a little bonus
+        - midday/early afternoon: stronger bonus
+        - late evening: slight penalty
+        """
+        try:
+            rules = self._get_recommendation_rules()
+            bonus_cfg = rules.get("business_hours_bonus", {})
+            if not isinstance(bonus_cfg, dict):
+                bonus_cfg = {}
+
+            morning_bonus = bonus_cfg.get("morning_bonus", 8)
+            midday_bonus = bonus_cfg.get("midday_bonus", 12)
+            evening_penalty = bonus_cfg.get("evening_penalty", -5)
+
+            def _to_int(v, d):
+                if isinstance(v, bool):
+                    return d
+                if isinstance(v, str):
+                    if v.strip().lstrip("-").isdigit():
+                        return int(v.strip())
+                    return d
+                if isinstance(v, (int, float)):
+                    return int(v)
+                return d
+
+            morning_bonus = _to_int(morning_bonus, 8)
+            midday_bonus = _to_int(midday_bonus, 12)
+            evening_penalty = _to_int(evening_penalty, -5)
+
+            m = self._time_to_minutes(start_time)
+            if m is None:
+                return 0
+
+            if 10 * 60 <= m < 12 * 60:
+                return morning_bonus
+            if 12 * 60 <= m < 15 * 60:
+                return midday_bonus
+            if m >= 17 * 60:
+                return evening_penalty
+            return 0
+        except Exception as e:
+            logging.warning(f"Daytime bonus error: {e}")
+            return 0
+
+    def _get_recency_bonus(self, selected_date: str, start_time: str) -> int:
+        """
+        Prioritize times that are easier to commit to soon.
+        Same-day near-future gets the strongest bonus.
+        """
+        try:
+            import pytz
+            tokyo_tz = pytz.timezone("Asia/Tokyo")
+            now_dt = datetime.now(tokyo_tz)
+
+            candidate_naive = datetime.strptime(
+                f"{selected_date} {start_time}",
+                "%Y-%m-%d %H:%M",
+            )
+            candidate_dt = tokyo_tz.localize(candidate_naive)
+
+            diff_minutes = int((candidate_dt - now_dt).total_seconds() // 60)
+            if diff_minutes < 0:
+                return -9999
+
+            days_diff = (candidate_dt.date() - now_dt.date()).days
+
+            # Same-day: heavily favor near future
+            if days_diff == 0:
+                if diff_minutes <= 180:
+                    return 60
+                if diff_minutes <= 360:
+                    return 45
+                if diff_minutes <= 720:
+                    return 30
+                return 15
+
+            # Next day
+            if days_diff == 1:
+                if candidate_dt.hour < 12:
+                    return 28
+                if candidate_dt.hour < 16:
+                    return 24
+                return 18
+
+            # Within a few days
+            if days_diff <= 3:
+                return 12
+
+            # Beyond that, mild baseline
+            return 5
+        except Exception as e:
+            logging.warning(f"Recency bonus error: {e}")
+            return 0
+
+    def _score_time_option(
+        self,
+        selected_date: str,
+        start_time: str,
+    ) -> int:
+        score = 0
+
+        score += self._get_recency_bonus(selected_date, start_time)
+        score += self._get_preferred_time_range_bonus(start_time)
+        score += self._get_daytime_bonus(start_time)
+
+        # Tiny tie-breaker: earlier time wins when scores are same
+        minutes = self._time_to_minutes(start_time)
+        if minutes is not None:
+            score += max(0, 1_000 - minutes) // 1_000  # basically 0 or 1, safe tie-break
+
+        return score
+
+    def _sort_time_options_for_recommendation(
+        self,
+        selected_date: str,
+        time_options: List[str],
+    ) -> List[str]:
+        """
+        Higher score first. If score ties, earlier time first.
+        """
+        try:
+            scored: List[Tuple[str, int, int]] = []
+            for t in time_options:
+                score = self._score_time_option(selected_date, t)
+                minutes = self._time_to_minutes(t)
+                if minutes is None:
+                    minutes = 9999
+                scored.append((t, score, minutes))
+
+            scored.sort(key=lambda x: (-x[1], x[2]))
+            return [t for t, _, _ in scored]
+        except Exception as e:
+            logging.warning(f"Sort time options for recommendation failed: {e}")
+            return sorted(time_options)
 
     def _get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
         if not service_id:
@@ -398,11 +639,59 @@ class ReservationFlow:
         service_duration: int,
     ) -> List[str]:
         time_options = self._build_time_options_30min(filtered_periods, service_duration)
-        return self._filter_time_options_by_deadline(
+        time_options = self._filter_time_options_by_deadline(
             user_id=user_id,
             selected_date=selected_date,
             time_options=time_options,
         )
+        time_options = self._sort_time_options_for_recommendation(
+            selected_date=selected_date,
+            time_options=time_options,
+        )
+        return time_options
+
+    def _build_time_selection_text(
+        self,
+        selected_date: str,
+        service_name: str,
+        service_duration: int,
+        time_options: List[str],
+    ) -> str:
+        """
+        Build dynamic time selection message from currently selectable time options.
+        Recommendation order is already optimized for conversion + business benefit.
+        """
+        if not time_options:
+            return (
+                f"{selected_date}ですね👌\n\n"
+                f"{service_name}（{service_duration}分）のご案内可能な時間がありません。"
+            )
+
+        recommend_count = self._get_recommend_count(2)
+        recommended = time_options[:recommend_count]
+        others = time_options[recommend_count:]
+
+        lines = [
+            f"{selected_date}ですね👌",
+            "",
+            f"{service_name}（{service_duration}分）の空き状況はこちら。",
+            "",
+        ]
+
+        if recommended:
+            lines.append("【🔥おすすめ】")
+            for t in recommended:
+                lines.append(f"・{t}～")
+            lines.append("")
+
+        if others:
+            lines.append("【その他】")
+            for t in others:
+                lines.append(f"・{t}～")
+            lines.append("")
+
+        lines.append("ご希望の時間をお選びください👇")
+        return "\n".join(lines)
 
     def _build_time_selection_quick_reply(
         self,
@@ -915,20 +1204,12 @@ class ReservationFlow:
         self.user_states[user_id]["time_selection_service_duration"] = service_duration
         self.user_states[user_id]["time_filtered_periods"] = filtered_periods
 
-        text = f"""{selected_date}ですね👌
-
-{service_name}（{service_duration}分）の空き状況はこちら。
-
-【🔥おすすめ】
-・10:00～
-・11:00～
-
-【その他】
-・13:00～
-・15:00～
-・17:00～
-
-ご希望の時間をお選びください👇"""
+        text = self._build_time_selection_text(
+            selected_date=selected_date,
+            service_name=service_name,
+            service_duration=service_duration,
+            time_options=time_options,
+        )
         return self._build_time_selection_quick_reply(user_id, text, page=0)
 
     def detect_intent(self, message: str, user_id: str = None) -> str:
@@ -1478,19 +1759,12 @@ class ReservationFlow:
             else:
                 new_page = min(total_pages - 1, current_page + 1)
 
-            text = f"""{selected_date}ですね👌
-{service_name}（{service_duration}分）の空き状況はこちら。
-
-【🔥おすすめ】
-・10:00～
-・11:00～
-
-【その他】
-・13:00～
-・15:00～
-・17:00～
-
-ご希望の時間をお選びください👇"""
+            text = self._build_time_selection_text(
+                selected_date=selected_date,
+                service_name=service_name,
+                service_duration=service_duration,
+                time_options=time_options,
+            )
             return self._build_time_selection_quick_reply(user_id, text, new_page)
 
         selected_date = self.user_states[user_id]["data"]["date"]
