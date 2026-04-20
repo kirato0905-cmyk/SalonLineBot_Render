@@ -1,27 +1,19 @@
-"""
-RAG-FAQ system using FAISS for semantic search
-Supports:
-- information_kb.json
-- sales_kb.json
-"""
-
-import json
-import os
 import re
 from typing import Dict, Any, Optional, List
 
 import faiss
 from sentence_transformers import SentenceTransformer
 
+from unified_kb_loader import UnifiedKBLoader
+
 
 class RAGFAQ:
-    def __init__(
-        self,
-        information_kb_path: str = "api/data/information_kb.json",
-        sales_kb_path: str = "api/data/sales_kb.json"
-    ):
-        self.information_kb: List[Dict[str, Any]] = self._load_kb_data(information_kb_path)
-        self.sales_kb: List[Dict[str, Any]] = self._load_kb_data(sales_kb_path)
+    def __init__(self, unified_kb_path: str = "api/data/unified_kb.json"):
+        loader = UnifiedKBLoader(unified_kb_path)
+
+        # unified_kb.json から typeごとに取り出して、旧KB互換形式へ変換
+        self.information_kb: List[Dict[str, Any]] = loader.export_legacy_kb_list(entry_type="kb")
+        self.sales_kb: List[Dict[str, Any]] = loader.export_legacy_kb_list(entry_type="sales")
 
         self.model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 
@@ -32,76 +24,6 @@ class RAGFAQ:
         self.sales_search_items: List[Dict[str, Any]] = []
 
         self._build_faiss_index()
-
-    def _load_kb_data(self, path: str) -> List[Dict[str, Any]]:
-        try:
-            possible_paths = []
-
-            if os.path.isabs(path):
-                possible_paths.append(path)
-            else:
-                clean_path = path.replace("api/", "")
-
-                base_dirs = [
-                    os.path.dirname(os.path.abspath(__file__)),
-                    os.getcwd(),
-                    os.path.join(os.getcwd(), "api"),
-                ]
-
-                for base_dir in base_dirs:
-                    possible_paths.append(os.path.join(base_dir, clean_path))
-                    possible_paths.append(os.path.join(base_dir, path))
-
-            for full_path in possible_paths:
-                try:
-                    if not os.path.exists(full_path) or not os.path.isfile(full_path):
-                        continue
-
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        raw_data = json.load(f)
-
-                    if not isinstance(raw_data, list):
-                        continue
-
-                    validated = []
-                    for item in raw_data:
-                        if not isinstance(item, dict):
-                            continue
-
-                        kb_id = str(item.get("id", "")).strip()
-                        category = str(item.get("カテゴリ", "その他")).strip()
-                        keys = item.get("キー", [])
-                        value = str(item.get("値", "")).strip()
-
-                        if isinstance(keys, str):
-                            keys = [keys]
-                        elif not isinstance(keys, list):
-                            keys = []
-
-                        keys = [str(k).strip() for k in keys if str(k).strip()]
-
-                        if not keys or not value:
-                            continue
-
-                        validated.append({
-                            "id": kb_id,
-                            "カテゴリ": category if category else "その他",
-                            "キー": keys,
-                            "値": value,
-                        })
-
-                    print(f"KB loaded: {len(validated)} entries from {full_path}")
-                    return validated
-
-                except (FileNotFoundError, OSError, json.JSONDecodeError):
-                    continue
-
-            print(f"Warning: Could not load KB data from {path}")
-            return []
-
-        except Exception as e:
-            print(f"Error loading KB data from {path}: {e}")
-            return []
 
     def _build_faiss_index(self):
         self.info_index, self.info_search_items = self._build_single_index(self.information_kb, "情報KB")
@@ -133,6 +55,7 @@ class RAGFAQ:
                 })
 
         if not texts:
+            print(f"Warning: {label} has no searchable texts.")
             return None, []
 
         embeddings = self.model.encode(texts, convert_to_numpy=True).astype("float32")
@@ -221,6 +144,7 @@ class RAGFAQ:
                     "raw_entry": entry,
                 })
 
+        # 長いキーを優先
         items.sort(key=lambda item: len(item["key"]), reverse=True)
 
         for item in items:
@@ -229,8 +153,14 @@ class RAGFAQ:
 
         return None
 
-    def _semantic_search(self, query: str, index, search_items: List[Dict[str, Any]], threshold: float = 0.35):
-        if not query or not index or not search_items:
+    def _semantic_search(
+        self,
+        query: str,
+        index,
+        search_items: List[Dict[str, Any]],
+        threshold: float = 0.35
+    ) -> Optional[Dict[str, Any]]:
+        if not query or index is None or not search_items:
             return None
 
         query_embedding = self.model.encode([query], convert_to_numpy=True).astype("float32")
@@ -260,12 +190,31 @@ class RAGFAQ:
         return any(hint in query for hint in hints)
 
     def get_kb_facts(self, user_message: str) -> Optional[Dict[str, Any]]:
+        """
+        Returns:
+        {
+            "kb_key": "...",
+            "similarity_score": 0.91,
+            "kb_facts": [
+                {"id": "...", "カテゴリ": "...", "キー": [...], "値": "..."},
+                ...
+            ],
+            "category": "...",
+            "question": "...",
+            "processed_answer": "..."
+        }
+        """
         if not user_message:
             return None
 
         info_match = self._keyword_search(user_message, self.information_kb)
         if not info_match:
-            info_match = self._semantic_search(user_message, self.info_index, self.info_search_items, threshold=0.35)
+            info_match = self._semantic_search(
+                user_message,
+                self.info_index,
+                self.info_search_items,
+                threshold=0.35
+            )
 
         if not info_match:
             return None
@@ -275,7 +224,12 @@ class RAGFAQ:
         if self._should_attach_sales_kb(user_message):
             sales_match = self._keyword_search(user_message, self.sales_kb)
             if not sales_match:
-                sales_match = self._semantic_search(user_message, self.sales_index, self.sales_search_items, threshold=0.35)
+                sales_match = self._semantic_search(
+                    user_message,
+                    self.sales_index,
+                    self.sales_search_items,
+                    threshold=0.35
+                )
 
             if sales_match:
                 kb_facts.append(sales_match["raw_entry"])
