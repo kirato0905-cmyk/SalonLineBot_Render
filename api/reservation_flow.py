@@ -5,35 +5,7 @@ Current supported flows:
 - Reservation modification via re-reservation only
 - Reservation cancellation
 
-Added:
-- Back navigation ("← 戻る") for:
-  - New reservation flow
-  - Re-reservation flow from modification
-  - Reservation flow via menu introduction
-  - Reservation flow via staff introduction
-- Safe handling for modification/cancellation when user has no reservations:
-  do not enter modify/cancel state until a valid reservation list exists
-
-Updated:
-- Reservation deadline rules are managed by data/settings.json
-- Separate limits for create / change / cancel
-- Invalid or missing settings fallback to 2 hours
-- settings.json is reloaded on every rule read for immediate reflection
-- Modification/cancellation selection also checks deadline immediately
-- If modification/cancellation is not allowed due to deadline, that flow ends immediately
-
-New:
-- In time selection quick replies, options past the reservation deadline are not shown
-- Deadline-aware filtering reflects settings.json immediately
-- Date buttons also avoid dates that have no selectable time left after deadline filtering
-- Time selection message is dynamically built from actual available options
-- Revenue-max recommendation scoring:
-  - nearer valid times are prioritized
-  - preferred time ranges from settings.json get bonus
-  - balanced daytime slots get bonus
-  - late slots can receive penalty
-- Quick replies keep all valid time options
-- LINE message text only is compressed for readability (roughly 1-hour spacing)
+config.json integrated version
 """
 
 import re
@@ -58,29 +30,30 @@ class ReservationFlow:
         self.google_calendar = GoogleCalendarHelper()
         self.line_configuration = None
 
-        self.services_data = self._load_services_data()
-        self.services = self.services_data.get("services", {})
-        self.staff_members = self.services_data.get("staff", {})
+        self.config_data = self._load_config_data()
+        self.services = self.config_data.get("services", {})
+        self.staff_members = self.config_data.get("staff", {})
 
         self.keywords_data = self._load_keywords_data()
         self.intent_keywords = self.keywords_data.get("intent_keywords", {})
         self.navigation_keywords = self.keywords_data.get("navigation_keywords", {})
         self.confirmation_keywords = self.keywords_data.get("confirmation_keywords", {})
 
-        self.settings_data = self._load_settings_data()
+        self.settings_data = self._extract_settings_from_config(self.config_data)
 
         self.back_label = "← 戻る"
 
-    def _load_services_data(self) -> Dict[str, Any]:
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            services_file = os.path.join(current_dir, "data", "services.json")
+    def _config_path(self) -> str:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(current_dir, "data", "config.json")
 
-            with open(services_file, "r", encoding="utf-8") as f:
+    def _load_config_data(self) -> Dict[str, Any]:
+        try:
+            with open(self._config_path(), "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logging.error(f"Failed to load services data: {e}")
-            raise RuntimeError(f"Cannot load services.json: {e}")
+            logging.error(f"Failed to load config data: {e}")
+            raise RuntimeError(f"Cannot load config.json: {e}")
 
     def _load_keywords_data(self) -> Dict[str, Any]:
         try:
@@ -93,28 +66,31 @@ class ReservationFlow:
             logging.error(f"Failed to load keywords data: {e}")
             raise RuntimeError(f"Cannot load keywords.json: {e}")
 
-    def _load_settings_data(self) -> Dict[str, Any]:
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            settings_file = os.path.join(current_dir, "data", "settings.json")
-
-            if not os.path.exists(settings_file):
-                logging.warning("settings.json not found. Using default reservation rules.")
-                return {}
-
-            with open(settings_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logging.error(f"Failed to load settings data: {e}")
-            return {}
+    def _extract_settings_from_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "timezone": config.get("salon", {}).get("timezone", "Asia/Tokyo"),
+            "business_hours": config.get("calendar", {}).get("business_hours", {}),
+            "monthly_closed": config.get("calendar", {}).get("monthly_closed", []),
+            "closed_dates": config.get("calendar", {}).get("closed_dates", []),
+            "special_hours": config.get("calendar", {}).get("special_hours", []),
+            "booking_rules": {
+                "slot_minutes": config.get("booking", {}).get("slot_minutes", 30)
+            },
+            "reservation_ui_limit_days": config.get("booking", {}).get("reservation_ui_limit_days", 45),
+            "reservation_rules": config.get("booking", {}).get("reservation_rules", {}),
+            "recommendation_rules": config.get("booking", {}).get("recommendation_rules", {}),
+        }
 
     def _reload_settings(self) -> Dict[str, Any]:
-        self.settings_data = self._load_settings_data()
+        self.config_data = self._load_config_data()
+        self.services = self.config_data.get("services", {})
+        self.staff_members = self.config_data.get("staff", {})
+        self.settings_data = self._extract_settings_from_config(self.config_data)
         return self.settings_data
 
     def _get_reservation_limit_hours(self, rule_key: str, default: int = 2) -> int:
         """
-        Reload settings.json every time for immediate reflection.
+        Reload config.json every time for immediate reflection.
         Fallback to default when the setting is missing or invalid.
         """
         try:
@@ -149,7 +125,7 @@ class ReservationFlow:
 
     def _get_recommendation_rules(self) -> Dict[str, Any]:
         """
-        Reload settings.json every time for immediate reflection.
+        Reload config.json every time for immediate reflection.
         """
         try:
             self._reload_settings()
@@ -404,6 +380,7 @@ class ReservationFlow:
         """
         try:
             import pytz
+
             tokyo_tz = pytz.timezone("Asia/Tokyo")
             now_dt = datetime.now(tokyo_tz)
 
@@ -653,11 +630,6 @@ class ReservationFlow:
         selected_date: str,
         time_options: List[str],
     ) -> List[str]:
-        """
-        Remove start times that already passed the reservation deadline.
-        settings.json is reflected immediately because _check_advance_booking_time()
-        reloads the reservation rule every time.
-        """
         valid_times = []
 
         for start_time in time_options:
@@ -697,12 +669,6 @@ class ReservationFlow:
         service_duration: int,
         time_options: List[str],
     ) -> str:
-        """
-        Build dynamic time selection message from currently selectable time options.
-        Recommendation order is already optimized.
-        Only the LINE message text is compressed for readability.
-        Quick reply options remain unchanged.
-        """
         if not time_options:
             return (
                 f"{selected_date}ですね👌\n\n"
@@ -749,10 +715,6 @@ class ReservationFlow:
         text: str,
         page: int,
     ) -> Dict[str, Any]:
-        """
-        Quick reply keeps all valid options.
-        Only message text is compressed.
-        """
         time_options = self.user_states[user_id].get("time_options", [])
         per_page = 8
         total_pages = max(1, (len(time_options) + per_page - 1) // per_page)
@@ -1045,9 +1007,11 @@ class ReservationFlow:
         if show_next:
             items.append({"label": "次の週", "text": "次の週"})
 
+        example_date = (datetime.now().date() + timedelta(days=7)).strftime("%Y-%m-%d")
+
         header = "📅 ご希望の日付をお選びください👇\n\n"
         header += "※土日・午前中は埋まりやすいためお早めのご予約がおすすめです！\n\n"
-        header += f"※{limit_days}日以降は「2026-01-07」の形式でご入力ください。"
+        header += f"※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
 
         text = (f"{error_prefix}\n\n" if error_prefix else "") + header
         return self._quick_reply_return(
@@ -1064,28 +1028,19 @@ class ReservationFlow:
         self.user_states[user_id]["step"] = "staff_selection"
 
         staff_items = []
+        staff_lines = []
+
         for staff_id, staff_data in self.staff_members.items():
             staff_name = staff_data.get("name", staff_id)
             staff_items.append({"label": staff_name, "text": staff_name})
+            staff_lines.append(f"・{staff_name}")
 
         text = f"""{service_name}承ります👌
 
 担当スタッフをお選びください👇
 
-【🔥一番人気】
-・山田
-→指名率No.1／扱いやすいカットが好評
+{chr(10).join(staff_lines)}"""
 
-【✨迷ったらこちら】
-・おまかせ
-→当店おすすめのスタッフが担当します
-
-【その他】
-・佐藤
-→透明感カラーが得意
-
-・鈴木
-→パーマ・似合わせが得意"""
         return self._quick_reply_return(text, staff_items, include_cancel=True, include_back=True)
 
     def _go_back_one_step(self, user_id: str) -> Union[str, Dict[str, Any]]:
@@ -1370,16 +1325,14 @@ class ReservationFlow:
 人気メニューはこちら👇
 
 【🔥一番人気】
-・カット＋カラー＋トリートメント
-→ツヤ・色持ち◎
-
-【✨迷ったらこれ】
 ・カット＋カラー
+→まとめて整えたい方におすすめ
 
 【その他】
 ・カット
 ・カラー
 ・パーマ
+・トリートメント
 
 ご希望のメニューをお選びください👇"""
         return self._quick_reply_return(
@@ -1553,11 +1506,6 @@ class ReservationFlow:
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
-        service_change_keywords = self.navigation_keywords.get("service_change", [])
-        if any(keyword in message_normalized for keyword in service_change_keywords):
-            self.user_states[user_id]["step"] = "service_selection"
-            return self._start_reservation(user_id)
-
         selected_staff = None
         message_lower = message.strip().lower()
 
@@ -1572,11 +1520,8 @@ class ReservationFlow:
                 {"label": s.get("name", sid), "text": s.get("name", sid)}
                 for sid, s in self.staff_members.items()
             ]
-            staff_lines = [
-                f"・{s.get('name', sid)}（{s.get('specialty', '')}・{s.get('experience', '')}）"
-                for sid, s in self.staff_members.items()
-            ]
-            text = "申し訳ございませんが、その美容師は選択できません。上記の美容師からお選びください。\n\n" + "\n".join(staff_lines)
+            staff_lines = [f"・{s.get('name', sid)}" for sid, s in self.staff_members.items()]
+            text = "申し訳ございませんが、そのスタッフは選択できません。下記からお選びください。\n\n" + "\n".join(staff_lines)
             return self._quick_reply_return(text, staff_items, include_cancel=True, include_back=True)
 
         self.user_states[user_id]["data"]["staff"] = selected_staff
@@ -1600,11 +1545,6 @@ class ReservationFlow:
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
-
-        service_change_keywords = self.navigation_keywords.get("service_change", [])
-        if any(keyword in message_normalized for keyword in service_change_keywords):
-            self.user_states[user_id]["step"] = "service_selection"
-            return self._start_reservation(user_id)
 
         today = datetime.now().date()
         min_ws = self._calendar_week_monday(today)
@@ -1754,14 +1694,6 @@ class ReservationFlow:
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
-
-        date_change_keywords = self.navigation_keywords.get("date_change", [])
-        if any(keyword in message_normalized for keyword in date_change_keywords):
-            self.user_states[user_id]["step"] = "date_selection"
-            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
-                datetime.now().date()
-            ).strftime("%Y-%m-%d")
-            return self._build_date_week_selection_message(user_id, context="new_reservation")
 
         if message_normalized in ("前へ", "次へ"):
             selected_date = self.user_states[user_id].get(
@@ -2029,8 +1961,11 @@ class ReservationFlow:
             return {"available": True, "message": ""}
 
         except Exception as e:
-            logging.error(f"Error checking final availability: {e}")
-            return {"available": True, "message": ""}
+            logging.error(f"Error checking final availability: {e}", exc_info=True)
+            return {
+                "available": False,
+                "message": "空き状況の最終確認中にエラーが発生しました。もう一度お試しください。"
+            }
 
     def _handle_confirmation(self, user_id: str, message: str) -> str:
         yes_keywords = self.confirmation_keywords.get("yes", [])
@@ -2068,11 +2003,8 @@ class ReservationFlow:
                 reservation_data,
                 client_name,
             )
-
             if not calendar_success:
-                logging.error(
-                    f"[_handle_confirmation] Failed to create calendar event for user {user_id}, reservation {reservation_id}"
-                )
+                return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
 
             try:
                 from api.google_sheets_logger import GoogleSheetsLogger
@@ -2094,10 +2026,11 @@ class ReservationFlow:
 
                 sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
                 if not sheets_success:
-                    logging.error(f"Failed to save reservation {reservation_id} to Reservations sheet")
+                    return "申し訳ございません。予約保存中にエラーが発生しました。時間をおいてもう一度お試しください。"
 
             except Exception as e:
                 logging.error(f"Error saving reservation to Google Sheets: {e}", exc_info=True)
+                return "申し訳ございません。予約保存中にエラーが発生しました。"
 
             is_modification = self.user_states[user_id].get("is_modification", False)
             original_reservation = self.user_states[user_id].get("original_reservation")
@@ -2155,14 +2088,12 @@ class ReservationFlow:
             except Exception as e:
                 logging.error(f"Failed to send notification: {e}", exc_info=True)
 
-            self.user_states[user_id]["data"] = reservation_data
-
             time_display = reservation_data.get("start_time", reservation_data["time"])
-            if "end_time" in reservation_data:
+            if reservation_data.get("end_time"):
                 time_display = f"{reservation_data['start_time']}~{reservation_data['end_time']}"
 
             if is_modification and original_reservation:
-                return f"""予約の変更が完了しました😊
+                response_text = f"""予約の変更が完了しました😊
 
 🆔：{reservation_id}
 📅：{reservation_data['date']} {time_display}
@@ -2172,7 +2103,7 @@ class ReservationFlow:
 当日はお気をつけてお越しください。
 ご来店をお待ちしております✨"""
             else:
-                return f"""ご予約が確定しました😊
+                response_text = f"""ご予約が確定しました😊
 
 🆔：{reservation_id}
 📅：{reservation_data['date']} {time_display}
@@ -2181,6 +2112,11 @@ class ReservationFlow:
 
 当日はお気をつけてお越しください。
 ご来店お待ちしております✨"""
+
+            if user_id in self.user_states:
+                del self.user_states[user_id]
+
+            return response_text
 
         return "「確定」とお送りください。"
 
@@ -2220,6 +2156,9 @@ class ReservationFlow:
 
             for res in reservations:
                 try:
+                    if res.get("status") == "Cancelled":
+                        continue
+
                     reservation_date = res.get("date", "")
                     reservation_start_time = res.get("start_time", "")
 
@@ -2358,16 +2297,13 @@ class ReservationFlow:
 新しい内容をお選びください👇
 
 【🔥一番人気】
-・カット＋カラー＋トリートメント
-→ツヤ・色持ち◎
-
-【✨迷ったらこれ】
 ・カット＋カラー
 
 【その他】
 ・カット
 ・カラー
 ・パーマ
+・トリートメント
 
 ご希望のメニューをお選びください👇"""
 
@@ -2458,6 +2394,9 @@ class ReservationFlow:
 
             for res in reservations:
                 try:
+                    if res.get("status") == "Cancelled":
+                        continue
+
                     reservation_date = res.get("date", "")
                     reservation_start_time = res.get("start_time", "")
 
@@ -2776,7 +2715,7 @@ def print_help():
     print("🎯 RESERVATION FLOW COMMANDS:")
     print("  • 予約したい, 予約お願い, 予約できますか - Start reservation")
     print("  • カット, カラー, パーマ, トリートメント - Select service")
-    print("  • 田中, 佐藤, 山田, 未指定 - Select staff")
+    print("  • 田中, 佐藤, 山田 - Select staff")
     print("  • 2025-01-15 (or any date) - Select date")
     print("  • 10:00, 10:30, 10時, 10時30分 - Select start time")
     print("  • はい, 確定, お願い - Confirm reservation")
@@ -2784,8 +2723,6 @@ def print_help():
     print("  • ← 戻る, 戻る - Go back one step in supported reservation flows")
     print()
     print("🔄 NAVIGATION COMMANDS:")
-    print("  • 日付変更, 日付を変更, 別の日 - Go back to date selection")
-    print("  • サービス変更, サービスを変更 - Go back to service selection")
     print("  • キャンセル, 取り消し, やめる - Cancel current flow")
     print()
     print("📋 RESERVATION MANAGEMENT:")
