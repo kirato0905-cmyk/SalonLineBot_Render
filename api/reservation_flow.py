@@ -19,6 +19,7 @@ Updated:
 - Separate limits for create / change / cancel
 - Invalid or missing settings fallback to 2 hours
 - settings.json is reloaded on every rule read for immediate reflection
+- Modification/cancellation selection also checks deadline immediately
 """
 
 import re
@@ -168,6 +169,53 @@ class ReservationFlow:
 
         except Exception as e:
             logging.error(f"Error checking reservation deadline: {e}")
+            return False, "エラーが発生しました。もう一度お試しください。"
+
+    def _check_existing_reservation_deadline(
+        self,
+        reservation: Dict[str, Any],
+        rule_key: str,
+        action_label: str,
+    ) -> tuple:
+        """
+        Existing reservation deadline checker for modification / cancellation.
+        reservation must contain:
+          - date
+          - start_time
+        """
+        try:
+            reservation_date = reservation.get("date")
+            reservation_start_time = reservation.get("start_time")
+
+            if not reservation_date or not reservation_start_time:
+                return False, "予約情報の取得に失敗しました。もう一度お試しください。"
+
+            limit_hours = self._get_reservation_limit_hours(rule_key, 2)
+
+            import pytz
+
+            tokyo_tz = pytz.timezone("Asia/Tokyo")
+            reservation_datetime_naive = datetime.strptime(
+                f"{reservation_date} {reservation_start_time}",
+                "%Y-%m-%d %H:%M",
+            )
+            reservation_datetime = tokyo_tz.localize(reservation_datetime_naive)
+            current_datetime = datetime.now(tokyo_tz)
+
+            deadline_datetime = reservation_datetime - timedelta(hours=limit_hours)
+
+            if current_datetime > deadline_datetime:
+                return (
+                    False,
+                    f"申し訳ございませんが、{action_label}は予約開始時刻の{limit_hours}時間前までとなっております。\n"
+                    f"この予約は締切時間を過ぎているため、お手続きできません。\n"
+                    f"緊急の場合は直接サロンにご連絡ください。"
+                )
+
+            return True, None
+
+        except Exception as e:
+            logging.error(f"Error checking existing reservation deadline: {e}")
             return False, "エラーが発生しました。もう一度お試しください。"
 
     def _calculate_time_duration_minutes(self, start_time: str, end_time: str) -> int:
@@ -1855,6 +1903,14 @@ class ReservationFlow:
                     include_back=False,
                 )
 
+            is_within_deadline, deadline_message = self._check_existing_reservation_deadline(
+                selected_reservation,
+                "change_limit_hours",
+                "予約変更",
+            )
+            if not is_within_deadline:
+                return deadline_message
+
             self.user_states[user_id]["original_reservation"] = selected_reservation
             self.user_states[user_id]["is_modification"] = True
 
@@ -2041,7 +2097,7 @@ class ReservationFlow:
 
         try:
             if re.match(r"^RES-\d{8}-\d{4}$", message):
-                reservation_id = message
+                reservation_id = message.strip()
                 selected_reservation = None
                 for res in reservations:
                     if res["reservation_id"] == reservation_id:
@@ -2049,6 +2105,14 @@ class ReservationFlow:
                         break
 
                 if selected_reservation:
+                    is_within_deadline, deadline_message = self._check_existing_reservation_deadline(
+                        selected_reservation,
+                        "cancel_limit_hours",
+                        "予約キャンセル",
+                    )
+                    if not is_within_deadline:
+                        return deadline_message
+
                     self.user_states[user_id]["selected_reservation"] = selected_reservation
                     self.user_states[user_id]["step"] = "cancel_confirm"
 
@@ -2075,6 +2139,14 @@ class ReservationFlow:
                 reservation_index = int(message) - 1
                 if 0 <= reservation_index < len(reservations):
                     selected_reservation = reservations[reservation_index]
+
+                    is_within_deadline, deadline_message = self._check_existing_reservation_deadline(
+                        selected_reservation,
+                        "cancel_limit_hours",
+                        "予約キャンセル",
+                    )
+                    if not is_within_deadline:
+                        return deadline_message
 
                     self.user_states[user_id]["selected_reservation"] = selected_reservation
                     self.user_states[user_id]["step"] = "cancel_confirm"
