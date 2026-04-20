@@ -4,6 +4,13 @@ Current supported flows:
 - New reservation
 - Reservation modification via re-reservation only
 - Reservation cancellation
+
+Added:
+- Back navigation ("← 戻る") for:
+  - New reservation flow
+  - Re-reservation flow from modification
+  - Reservation flow via menu introduction
+  - Reservation flow via staff introduction
 """
 
 import re
@@ -36,6 +43,8 @@ class ReservationFlow:
         self.intent_keywords = self.keywords_data.get("intent_keywords", {})
         self.navigation_keywords = self.keywords_data.get("navigation_keywords", {})
         self.confirmation_keywords = self.keywords_data.get("confirmation_keywords", {})
+
+        self.back_label = "← 戻る"
 
     def _load_services_data(self) -> Dict[str, Any]:
         try:
@@ -114,16 +123,65 @@ class ReservationFlow:
                 return service_data.get("id")
         return None
 
+    def _is_back_command(self, message: str) -> bool:
+        raw = str(message).strip()
+        return raw in [self.back_label, "戻る"]
+
     def _quick_reply_return(
         self,
         text: str,
-        items: List[Dict[str, str]],
+        items: List[Dict[str, Any]],
         include_cancel: bool = True,
+        include_back: bool = False,
     ) -> Dict[str, Any]:
-        cancel_label = "キャンセル"
+        final_items = []
+
+        if include_back:
+            final_items.append({"label": self.back_label, "text": self.back_label})
+
+        final_items.extend(list(items))
+
         if include_cancel:
-            items = list(items) + [{"label": cancel_label, "text": cancel_label}]
-        return {"text": text, "quick_reply_items": items}
+            final_items.append({"label": "キャンセル", "text": "キャンセル"})
+
+        return {"text": text, "quick_reply_items": final_items}
+
+    def _clear_reservation_selection_after_service(self, user_id: str):
+        state = self.user_states.get(user_id, {})
+        data = state.get("data", {})
+        for key in ["date", "start_time", "end_time", "time"]:
+            data.pop(key, None)
+
+        for key in [
+            "time_options",
+            "time_slot_page",
+            "time_selection_date",
+            "time_selection_service_duration",
+            "time_filtered_periods",
+        ]:
+            state.pop(key, None)
+
+    def _clear_reservation_selection_after_staff(self, user_id: str):
+        state = self.user_states.get(user_id, {})
+        data = state.get("data", {})
+        for key in ["date", "start_time", "end_time", "time"]:
+            data.pop(key, None)
+
+        for key in [
+            "time_options",
+            "time_slot_page",
+            "time_selection_date",
+            "time_selection_service_duration",
+            "time_filtered_periods",
+            "date_selection_week_start",
+        ]:
+            state.pop(key, None)
+
+    def _clear_time_selection(self, user_id: str):
+        state = self.user_states.get(user_id, {})
+        data = state.get("data", {})
+        for key in ["start_time", "end_time", "time"]:
+            data.pop(key, None)
 
     def _build_time_options_30min(
         self,
@@ -175,7 +233,12 @@ class ReservationFlow:
         if page < total_pages - 1:
             items.append({"label": "次へ", "text": "次へ"})
 
-        return self._quick_reply_return(text, items)
+        return self._quick_reply_return(
+            text,
+            items,
+            include_cancel=True,
+            include_back=True,
+        )
 
     def _normalize_service_input(self, text: str) -> str:
         if not text:
@@ -442,7 +505,110 @@ class ReservationFlow:
         header += f"※{limit_days}日以降は「2026-01-07」の形式でご入力ください。"
 
         text = (f"{error_prefix}\n\n" if error_prefix else "") + header
-        return self._quick_reply_return(text, items)
+        return self._quick_reply_return(
+            text,
+            items,
+            include_cancel=True,
+            include_back=True,
+        )
+
+    def _build_staff_selection_message(self, user_id: str) -> Dict[str, Any]:
+        service_id = self.user_states[user_id]["data"].get("service_id")
+        service_name = self._get_service_name_by_id(service_id) if service_id else ""
+
+        self.user_states[user_id]["step"] = "staff_selection"
+
+        staff_items = []
+        for staff_id, staff_data in self.staff_members.items():
+            staff_name = staff_data.get("name", staff_id)
+            staff_items.append({"label": staff_name, "text": staff_name})
+
+        text = f"""{service_name}承ります👌
+
+担当スタッフをお選びください👇
+
+【🔥一番人気】
+・山田
+→指名率No.1／扱いやすいカットが好評
+
+【✨迷ったらこちら】
+・おまかせ
+→当店おすすめのスタッフが担当します
+
+【その他】
+・佐藤
+→透明感カラーが得意
+
+・鈴木
+→パーマ・似合わせが得意"""
+        return self._quick_reply_return(text, staff_items, include_cancel=True, include_back=True)
+
+    def _go_back_one_step(self, user_id: str) -> Union[str, Dict[str, Any]]:
+        if user_id not in self.user_states:
+            return "現在進行中の予約はありません。"
+
+        state = self.user_states[user_id]
+        step = state.get("step")
+        data = state.get("data", {})
+
+        if step == "service_selection":
+            text = "この画面では戻れません。メニューをお選びください。"
+            return self._quick_reply_return(
+                text,
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=False,
+            )
+
+        if step == "staff_selection":
+            data.pop("staff", None)
+            self._clear_reservation_selection_after_staff(user_id)
+            state["step"] = "service_selection"
+            return self._start_reservation(user_id)
+
+        if step == "date_selection":
+            self._clear_reservation_selection_after_staff(user_id)
+            back_target = state.get("date_selection_back_target", "staff_selection")
+
+            if back_target == "service_selection":
+                state["step"] = "service_selection"
+                return self._start_reservation(user_id)
+
+            data.pop("staff", None)
+            return self._build_staff_selection_message(user_id)
+
+        if step == "time_selection":
+            self._clear_time_selection(user_id)
+            state["step"] = "date_selection"
+
+            selected_date = data.get("date")
+            if selected_date:
+                try:
+                    selected_date_obj = datetime.strptime(selected_date, "%Y-%m-%d").date()
+                    state["date_selection_week_start"] = self._calendar_week_monday(
+                        selected_date_obj
+                    ).strftime("%Y-%m-%d")
+                except ValueError:
+                    state["date_selection_week_start"] = self._calendar_week_monday(
+                        datetime.now().date()
+                    ).strftime("%Y-%m-%d")
+            else:
+                state["date_selection_week_start"] = self._calendar_week_monday(
+                    datetime.now().date()
+                ).strftime("%Y-%m-%d")
+
+            return self._build_date_week_selection_message(user_id, context="new_reservation")
+
+        if step == "confirmation":
+            self._clear_time_selection(user_id)
+            state["step"] = "time_selection"
+            selected_date = data.get("date")
+            if not selected_date:
+                state["step"] = "date_selection"
+                return self._build_date_week_selection_message(user_id, context="new_reservation")
+            return self._apply_selected_date_go_to_time_selection(user_id, selected_date)
+
+        return "この画面では戻れません。"
 
     def _apply_selected_date_go_to_time_selection(
         self,
@@ -603,12 +769,16 @@ class ReservationFlow:
 
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = message.strip()
+
         if any(keyword in message_normalized for keyword in flow_cancel_keywords):
             is_modification = self.user_states[user_id].get("is_modification", False)
             del self.user_states[user_id]
             if is_modification:
                 return "予約変更をキャンセルいたします。元の予約はそのまま有効です。またのご利用をお待ちしております。"
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+
+        if self._is_back_command(message_normalized):
+            return self._go_back_one_step(user_id)
 
         state = self.user_states[user_id]
         step = state["step"]
@@ -656,7 +826,12 @@ class ReservationFlow:
 ・パーマ
 
 ご希望のメニューをお選びください👇"""
-        return self._quick_reply_return(text, menu_items, include_cancel=True)
+        return self._quick_reply_return(
+            text,
+            menu_items,
+            include_cancel=True,
+            include_back=False,
+        )
 
     def _build_service_quick_reply_postback_items(self) -> List[Dict[str, str]]:
         items = []
@@ -682,6 +857,7 @@ class ReservationFlow:
                 text,
                 self._build_service_quick_reply_postback_items(),
                 include_cancel=True,
+                include_back=False,
             )
 
         service_id = str(service_identifier).strip()
@@ -692,6 +868,7 @@ class ReservationFlow:
                 text,
                 self._build_service_quick_reply_postback_items(),
                 include_cancel=True,
+                include_back=False,
             )
 
         existing_state = self.user_states.get(user_id, {})
@@ -738,9 +915,12 @@ class ReservationFlow:
         service_name = self._get_service_name_by_id(service_id) if service_id else ""
         preselected_staff = self.user_states[user_id]["data"].get("staff")
 
+        self._clear_reservation_selection_after_service(user_id)
+
         if preselected_staff:
             self.user_states[user_id]["data"]["staff"] = preselected_staff
             self.user_states[user_id]["step"] = "date_selection"
+            self.user_states[user_id]["date_selection_back_target"] = "service_selection"
             staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
             intro = f"""{service_name}ですね👌
 担当者は{staff_display}になります😊
@@ -756,6 +936,7 @@ class ReservationFlow:
             single_staff_name = self._get_single_staff_name()
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
+            self.user_states[user_id]["date_selection_back_target"] = "service_selection"
             intro = f"""{service_name}ですね👌
 
 担当者は{single_staff_name}になります😊
@@ -767,31 +948,8 @@ class ReservationFlow:
             reply["text"] = intro + reply["text"]
             return reply
 
-        self.user_states[user_id]["step"] = "staff_selection"
-        staff_items = []
-        for staff_id, staff_data in self.staff_members.items():
-            staff_name = staff_data.get("name", staff_id)
-            staff_items.append({"label": staff_name, "text": staff_name})
-
-        text = f"""{service_name}承ります👌
-
-担当スタッフをお選びください👇
-
-【🔥一番人気】
-・山田
-→指名率No.1／扱いやすいカットが好評
-
-【✨迷ったらこちら】
-・おまかせ
-→当店おすすめのスタッフが担当します
-
-【その他】
-・佐藤
-→透明感カラーが得意
-
-・鈴木
-→パーマ・似合わせが得意"""
-        return self._quick_reply_return(text, staff_items)
+        self.user_states[user_id]["date_selection_back_target"] = "staff_selection"
+        return self._build_staff_selection_message(user_id)
 
     def _handle_service_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
@@ -809,6 +967,7 @@ class ReservationFlow:
                 text,
                 self._build_service_quick_reply_postback_items(),
                 include_cancel=True,
+                include_back=False,
             )
 
         if len(matches) > 1:
@@ -820,7 +979,12 @@ class ReservationFlow:
                 }
                 for m in matches
             ]
-            return self._quick_reply_return("複数該当しました。どちらにしますか？", items, include_cancel=True)
+            return self._quick_reply_return(
+                "複数該当しました。どちらにしますか？",
+                items,
+                include_cancel=True,
+                include_back=False,
+            )
 
         service_id, _ = matches[0]
         self.user_states[user_id]["data"]["service_id"] = service_id
@@ -857,10 +1021,12 @@ class ReservationFlow:
                 for sid, s in self.staff_members.items()
             ]
             text = "申し訳ございませんが、その美容師は選択できません。上記の美容師からお選びください。\n\n" + "\n".join(staff_lines)
-            return self._quick_reply_return(text, staff_items)
+            return self._quick_reply_return(text, staff_items, include_cancel=True, include_back=True)
 
         self.user_states[user_id]["data"]["staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
+        self.user_states[user_id]["date_selection_back_target"] = "staff_selection"
+
         staff_display = f"{selected_staff}さん" if selected_staff != "未指定" else selected_staff
         intro = f"""担当者：{staff_display}ですね。
 
@@ -1220,7 +1386,12 @@ class ReservationFlow:
 料金：{price_val:,}円
 
 この内容で予約を確定しますか？"""
-        return self._quick_reply_return(text, [{"label": "確定", "text": "確定"}])
+        return self._quick_reply_return(
+            text,
+            [{"label": "確定", "text": "確定"}],
+            include_cancel=True,
+            include_back=True,
+        )
 
     def _check_final_availability(self, reservation_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -1370,14 +1541,18 @@ class ReservationFlow:
                         "Cancelled",
                     )
                     if not sheets_success:
-                        logging.warning(f"[Modification] Failed to update Google Sheets status for {original_reservation_id}")
+                        logging.warning(
+                            f"[Modification] Failed to update Google Sheets status for {original_reservation_id}"
+                        )
 
                     calendar_success = self.google_calendar.cancel_reservation_by_id(
                         original_reservation_id,
                         original_staff_name,
                     )
                     if not calendar_success:
-                        logging.warning(f"[Modification] Failed to delete original reservation {original_reservation_id} from Google Calendar")
+                        logging.warning(
+                            f"[Modification] Failed to delete original reservation {original_reservation_id} from Google Calendar"
+                        )
 
                 except Exception as e:
                     logging.error(
@@ -1518,7 +1693,12 @@ class ReservationFlow:
 
 {chr(10).join(reservation_list)}"""
 
-            return self._quick_reply_return(text, quick_reply_items)
+            return self._quick_reply_return(
+                text,
+                quick_reply_items,
+                include_cancel=True,
+                include_back=False,
+            )
 
         except Exception as e:
             logging.error(f"Failed to show user reservations for modification: {e}")
@@ -1565,6 +1745,8 @@ class ReservationFlow:
                     "正しい予約IDまたは番号を入力してください。\n\n"
                     "変更をやめる場合は「キャンセル」とお送りください。",
                     [],
+                    include_cancel=True,
+                    include_back=False,
                 )
 
             self.user_states[user_id]["original_reservation"] = selected_reservation
@@ -1599,7 +1781,12 @@ class ReservationFlow:
 
 ご希望のメニューをお選びください👇"""
 
-            return self._quick_reply_return(text, menu_items)
+            return self._quick_reply_return(
+                text,
+                menu_items,
+                include_cancel=True,
+                include_back=False,
+            )
 
         except Exception as e:
             logging.error(f"Reservation selection for modification failed: {e}")
@@ -1723,7 +1910,12 @@ class ReservationFlow:
 キャンセルする予約をお選びください👇
 
 {chr(10).join(reservation_list)}"""
-            return self._quick_reply_return(text, quick_reply_items)
+            return self._quick_reply_return(
+                text,
+                quick_reply_items,
+                include_cancel=True,
+                include_back=False,
+            )
 
         except Exception as e:
             logging.error(f"Failed to show user reservations for cancellation: {e}")
@@ -1754,11 +1946,18 @@ class ReservationFlow:
  📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
  💇：{selected_reservation['service']}
  👤：{selected_reservation['staff']}"""
-                    return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
+                    return self._quick_reply_return(
+                        text,
+                        [{"label": "確定", "text": "はい"}],
+                        include_cancel=True,
+                        include_back=False,
+                    )
                 else:
                     return self._quick_reply_return(
                         "申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n正しい予約IDまたは番号を入力してください。",
                         [],
+                        include_cancel=True,
+                        include_back=False,
                     )
 
             elif message.isdigit():
@@ -1774,7 +1973,12 @@ class ReservationFlow:
  📅：{selected_reservation['date']} {selected_reservation['start_time']}~{selected_reservation['end_time']}
  💇：{selected_reservation['service']}
  👤：{selected_reservation['staff']}"""
-                    return self._quick_reply_return(text, [{"label": "確定", "text": "はい"}])
+                    return self._quick_reply_return(
+                        text,
+                        [{"label": "確定", "text": "はい"}],
+                        include_cancel=True,
+                        include_back=False,
+                    )
                 else:
                     return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。"
             else:
@@ -1960,6 +2164,7 @@ def print_help():
     print("  • 10:00, 10:30, 10時, 10時30分 - Select start time")
     print("  • はい, 確定, お願い - Confirm reservation")
     print("  • いいえ, キャンセル, やめる - Cancel reservation")
+    print("  • ← 戻る, 戻る - Go back one step in supported reservation flows")
     print()
     print("🔄 NAVIGATION COMMANDS:")
     print("  • 日付変更, 日付を変更, 別の日 - Go back to date selection")
@@ -1997,6 +2202,8 @@ def print_user_status(rf, user_id):
             print(f"  • is_modification: {state.get('is_modification')}")
         if "original_reservation" in state:
             print(f"  • original_reservation: {state.get('original_reservation')}")
+        if "date_selection_back_target" in state:
+            print(f"  • date_selection_back_target: {state.get('date_selection_back_target')}")
     else:
         print("No active session")
 
