@@ -1,4 +1,5 @@
 import logging
+import re
 from linebot.v3.messaging import (
     TemplateMessage,
     ButtonsTemplate,
@@ -132,18 +133,47 @@ def send_faq_menu(reply_token, configuration):
 
 def get_faq_by_number(faq_number):
     """
-    番号でFAQを取得（Q1形式のみに対応）
-    unified_kb.json の faq entries を返す
+    FAQ番号でFAQを取得
+    対応例:
+    - Q1
+    - q1
+    - Q 1
+    - q 1
+    - 1
+    - １
+    - Q１
+    - Ｑ２
     """
     try:
-        if not isinstance(faq_number, str):
+        if faq_number is None:
             return None
 
-        normalized = faq_number.strip().upper()
-        if not normalized.startswith("Q"):
+        text = str(faq_number).strip()
+
+        # 全角 → 半角
+        trans = str.maketrans({
+            "Ｑ": "Q",
+            "ｑ": "q",
+            "０": "0",
+            "１": "1",
+            "２": "2",
+            "３": "3",
+            "４": "4",
+            "５": "5",
+            "６": "6",
+            "７": "7",
+            "８": "8",
+            "９": "9",
+        })
+        text = text.translate(trans)
+
+        # Q2 / q2 / Q 2 / 2 など
+        match = re.fullmatch(r"(?:[Qq]\s*)?(\d+)", text)
+        if not match:
             return None
 
-        number = int(normalized.replace("Q", ""))
+        number = int(match.group(1))
+
         loader = _get_loader()
         faq_list = loader.get_faq_entries()
 
@@ -166,7 +196,7 @@ def send_faq_answer_by_item(reply_token, faq_item, configuration):
         answer = loader.render_response(faq_item)
 
         if not answer:
-            answer = "申し訳ありません、その質問は見つかりませんでした。"
+            answer = "申し訳ありません、そのFAQ番号は見つかりませんでした。"
 
         back_button = TemplateMessage(
             alt_text="他のよくある質問も見る",
