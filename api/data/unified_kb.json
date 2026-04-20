@@ -31,7 +31,7 @@
       },
       "priority": 100,
       "tags": ["faq", "price"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_menu",
@@ -48,7 +48,7 @@
       },
       "priority": 100,
       "tags": ["faq", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_same_day_reservation",
@@ -65,7 +65,7 @@
       },
       "priority": 100,
       "tags": ["faq", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_reservation_change_deadline",
@@ -82,7 +82,7 @@
       },
       "priority": 100,
       "tags": ["faq", "reservation_change"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_cancellation_deadline",
@@ -99,7 +99,7 @@
       },
       "priority": 100,
       "tags": ["faq", "cancellation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_late_arrival",
@@ -115,7 +115,7 @@
       },
       "priority": 100,
       "tags": ["faq", "late_arrival"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_parking",
@@ -131,7 +131,7 @@
       },
       "priority": 100,
       "tags": ["faq", "facility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "faq_payment_method",
@@ -147,9 +147,8 @@
       },
       "priority": 100,
       "tags": ["faq", "payment"],
-      "enabled": True
+      "enabled": true
     },
-
     {
       "id": "kb_store_name",
       "type": "kb",
@@ -159,10 +158,12 @@
         "exact": [],
         "keywords": ["店名", "お店の名前", "店舗名", "サロン名", "店の名前", "なんていう店"]
       },
-      "response": {"text": "{store_name}です。"},
+      "response": {
+        "text": "{store_name}です。"
+      },
       "priority": 95,
       "tags": ["kb", "store"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_address",
@@ -173,10 +174,12 @@
         "exact": [],
         "keywords": ["住所", "場所", "エリア", "どこにある"]
       },
-      "response": {"text": "{address}"},
+      "response": {
+        "text": "{address}"
+      },
       "priority": 95,
       "tags": ["kb", "store"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_nearest_station",
@@ -187,10 +190,12 @@
         "exact": [],
         "keywords": ["最寄り", "最寄り駅", "最寄駅", "何駅"]
       },
-      "response": {"text": "{nearest_station}です。"},
+      "response": {
+        "text": "{nearest_station}です。"
+      },
       "priority": 95,
       "tags": ["kb", "access"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_access",
@@ -201,10 +206,12 @@
         "exact": [],
         "keywords": ["アクセス", "行き方", "どうやって行く", "どうやって行けばいい", "駅からどう行く"]
       },
-      "response": {"text": "{access}"},
+      "response": {
+        "text": "{access}"
+      },
       "priority": 95,
       "tags": ["kb", "access"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_phone",
@@ -215,10 +222,12 @@
         "exact": [],
         "keywords": ["電話番号", "連絡先", "電話"]
       },
-      "response": {"text": "{phone}"},
+      "response": {
+        "text": "{phone}"
+      },
       "priority": 95,
       "tags": ["kb", "contact"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_sns",
@@ -229,10 +238,12 @@
         "exact": [],
         "keywords": ["SNS", "インスタ", "Instagram", "インスタグラム"]
       },
-      "response": {"text": "{sns}"},
+      "response": {
+        "text": "{sns}"
+      },
       "priority": 90,
       "tags": ["kb", "contact"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_parking",
@@ -243,10 +254,12 @@
         "exact": [],
         "keywords": ["駐車場", "車", "車で行ける"]
       },
-      "response": {"text": "{parking}"},
+      "response": {
+        "text": "{parking}"
+      },
       "priority": 90,
       "tags": ["kb", "facility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_bicycle",
@@ -257,10 +270,12 @@
         "exact": [],
         "keywords": ["駐輪場", "自転車", "自転車置ける"]
       },
-      "response": {"text": "{bicycle}"},
+      "response": {
+        "text": "{bicycle}"
+      },
       "priority": 90,
       "tags": ["kb", "facility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_hours",
@@ -271,10 +286,12 @@
         "exact": [],
         "keywords": ["営業時間", "何時から何時まで", "何時まで", "空いてる時間"]
       },
-      "response": {"text": "{hours}"},
+      "response": {
+        "text": "{hours}"
+      },
       "priority": 95,
       "tags": ["kb", "hours"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_last_reception",
@@ -285,10 +302,12 @@
         "exact": [],
         "keywords": ["最終受付", "何時まで受付", "受付終了"]
       },
-      "response": {"text": "最終受付はメニューによって異なります。詳細はサービスメニューをご覧ください。"},
+      "response": {
+        "text": "最終受付はメニューによって異なります。詳細はサービスメニューをご覧ください。"
+      },
       "priority": 90,
       "tags": ["kb", "hours"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_closed_days",
@@ -299,10 +318,12 @@
         "exact": [],
         "keywords": ["定休日", "休み", "店休日"]
       },
-      "response": {"text": "{closed_days}"},
+      "response": {
+        "text": "{closed_days}"
+      },
       "priority": 90,
       "tags": ["kb", "hours"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_holiday_season",
@@ -313,10 +334,12 @@
         "exact": [],
         "keywords": ["お盆", "年末年始", "連休", "年末", "正月"]
       },
-      "response": {"text": "{holiday_season}"},
+      "response": {
+        "text": "{holiday_season}"
+      },
       "priority": 80,
       "tags": ["kb", "hours"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_busy_time",
@@ -327,10 +350,12 @@
         "exact": [],
         "keywords": ["混む時間", "いつ混む", "混雑", "混んでる時間"]
       },
-      "response": {"text": "土日や夕方は混みやすくなっております。ご希望のお時間がある場合は、お早めのご予約がおすすめです。"},
+      "response": {
+        "text": "土日や夕方は混みやすくなっております。ご希望のお時間がある場合は、お早めのご予約がおすすめです。"
+      },
       "priority": 85,
       "tags": ["kb", "crowd"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_reservation_recommended",
@@ -341,10 +366,12 @@
         "exact": [],
         "keywords": ["予約いる", "予約必要", "予約した方がいい", "予約必須", "予約したいんだけど"]
       },
-      "response": {"text": "スムーズなご案内のため、事前のご予約をおすすめしております。ご予約は公式LINEから承っております。"},
+      "response": {
+        "text": "スムーズなご案内のため、事前のご予約をおすすめしております。ご予約は公式LINEから承っております。"
+      },
       "priority": 90,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_reservation_method",
@@ -355,10 +382,12 @@
         "exact": [],
         "keywords": ["予約方法", "どうやって予約", "予約したい", "予約の取り方"]
       },
-      "response": {"text": "ご予約は公式LINEから承っております。メニューからご案内いたします。"},
+      "response": {
+        "text": "ご予約は公式LINEから承っております。メニューからご案内いたします。"
+      },
       "priority": 90,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_same_day_reservation",
@@ -369,10 +398,12 @@
         "exact": [],
         "keywords": ["当日予約", "今日いける", "今日予約できる", "今から行ける"]
       },
-      "response": {"text": "空きがあれば当日のご予約も可能です。"},
+      "response": {
+        "text": "空きがあれば当日のご予約も可能です。"
+      },
       "priority": 92,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_reservation_change",
@@ -383,10 +414,12 @@
         "exact": [],
         "keywords": ["変更できる", "予約変更", "日時変更", "予約変えたい"]
       },
-      "response": {"text": "前日までであればご予約の変更が可能です。変更をご希望の場合は、お早めにご連絡ください。"},
+      "response": {
+        "text": "前日までであればご予約の変更が可能です。変更をご希望の場合は、お早めにご連絡ください。"
+      },
       "priority": 92,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_cancellation",
@@ -397,10 +430,12 @@
         "exact": [],
         "keywords": ["キャンセルできる", "キャンセル", "キャンセル料", "キャンセル規定", "予約取り消し"]
       },
-      "response": {"text": "前日までであればキャンセル可能です。ご都合が変わった際は、分かった時点でご連絡いただけますと助かります"},
+      "response": {
+        "text": "前日までであればキャンセル可能です。ご都合が変わった際は、分かった時点でご連絡いただけますと助かります"
+      },
       "priority": 92,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_late_arrival",
@@ -411,10 +446,12 @@
         "exact": [],
         "keywords": ["遅れそう", "遅刻", "間に合わない", "遅れたらどうなる"]
       },
-      "response": {"text": "遅れる場合は事前にご連絡をお願いいたします。状況により施術時間が短くなる場合がございます。"},
+      "response": {
+        "text": "遅れる場合は事前にご連絡をお願いいたします。状況により施術時間が短くなる場合がございます。"
+      },
       "priority": 92,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_out_of_hours",
@@ -425,10 +462,12 @@
         "exact": [],
         "keywords": ["営業時間外対応", "時間外", "早朝", "夜遅く"]
       },
-      "response": {"text": "営業時間外のご対応は原則不可です。イベント等の特別対応は、別料金・事前相談となります。"},
+      "response": {
+        "text": "営業時間外のご対応は原則不可です。イベント等の特別対応は、別料金・事前相談となります。"
+      },
       "priority": 85,
       "tags": ["kb", "reservation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_menu_overview",
@@ -439,10 +478,12 @@
         "exact": [],
         "keywords": ["メニュー", "どんなメニュー", "何がある", "メニュー一覧"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 90,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_popular_menu",
@@ -453,10 +494,12 @@
         "exact": [],
         "keywords": ["人気メニュー", "おすすめメニュー", "一番人気", "人気No.1"]
       },
-      "response": {"text": "一番人気は『カット＋カラー＋トリートメント』です。迷われている方にも選ばれやすい定番メニューです。"},
+      "response": {
+        "text": "一番人気は『カット＋カラー＋トリートメント』です。迷われている方にも選ばれやすい定番メニューです。"
+      },
       "priority": 88,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_menu_consultation",
@@ -467,10 +510,12 @@
         "exact": [],
         "keywords": ["メニュー決まってない", "相談できる", "メニュー未定", "相談して決めたい"]
       },
-      "response": {"text": "もちろん可能です。ご来店後にご希望やお悩みを伺いながら、合うメニューをご提案いたします。まずはご希望日時だけでもお気軽にご予約ください。"},
+      "response": {
+        "text": "もちろん可能です。ご来店後にご希望やお悩みを伺いながら、合うメニューをご提案いたします。まずはご希望日時だけでもお気軽にご予約ください。"
+      },
       "priority": 88,
       "tags": ["kb", "menu", "consultation"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_treatment_time",
@@ -481,10 +526,12 @@
         "exact": [],
         "keywords": ["施術時間", "どれくらいかかる", "所要時間", "時間どのくらい"]
       },
-      "response": {"text": "施術時間はメニューによって異なります。詳細はサービスメニューをご覧ください。"},
+      "response": {
+        "text": "施術時間はメニューによって異なります。詳細はサービスメニューをご覧ください。"
+      },
       "priority": 88,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_first_visit",
@@ -495,10 +542,12 @@
         "exact": [],
         "keywords": ["初めて", "初回", "流れ", "初めてでも大丈夫"]
       },
-      "response": {"text": "初めての方もご安心ください。ご来店後にカウンセリングを行い、ご希望を伺ってから施術に入ります。"},
+      "response": {
+        "text": "初めての方もご安心ください。ご来店後にカウンセリングを行い、ご希望を伺ってから施術に入ります。"
+      },
       "priority": 88,
       "tags": ["kb", "service"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_concern_consultation",
@@ -509,10 +558,12 @@
         "exact": [],
         "keywords": ["悩み相談", "くせ毛", "ダメージ", "髪の悩み", "相談したい"]
       },
-      "response": {"text": "髪質やお悩みに合わせてご提案いたします。お悩みがある場合は、カウンセリング時に遠慮なくご相談ください。"},
+      "response": {
+        "text": "髪質やお悩みに合わせてご提案いたします。お悩みがある場合は、カウンセリング時に遠慮なくご相談ください。"
+      },
       "priority": 85,
       "tags": ["kb", "service"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_bleach_consultation",
@@ -523,12 +574,13 @@
         "exact": [],
         "keywords": ["ブリーチできる", "できない施術ある", "施術できるか", "この髪でできる"]
       },
-      "response": {"text": "髪の状態によっては、ご希望の施術ができない場合がございます。無理のない範囲で、できる限り最適なご提案をいたします。"},
+      "response": {
+        "text": "髪の状態によっては、ご希望の施術ができない場合がございます。無理のない範囲で、できる限り最適なご提案をいたします。"
+      },
       "priority": 84,
       "tags": ["kb", "service"],
-      "enabled": True
+      "enabled": true
     },
-
     {
       "id": "kb_cut_menu",
       "type": "kb",
@@ -538,10 +590,12 @@
         "exact": [],
         "keywords": ["カット", "前髪カット", "メンテナンスカット", "学生カット", "スクールカット"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_kids_cut",
@@ -552,10 +606,12 @@
         "exact": [],
         "keywords": ["キッズカット", "子供カット", "お子様カット"]
       },
-      "response": {"text": "キッズ向けのご案内も可能です。詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "キッズ向けのご案内も可能です。詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_color_menu",
@@ -566,10 +622,12 @@
         "exact": [],
         "keywords": ["カラー", "リタッチ", "フルカラー", "グレイカラー", "白髪染め", "ケアブリーチ", "ダブルカラー", "ハイライト", "ローライト", "インナーカラー", "イヤリングカラー", "バレイヤージュ", "グラデーションカラー"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_perm_menu",
@@ -580,10 +638,12 @@
         "exact": [],
         "keywords": ["パーマ", "コールドパーマ", "デジタルパーマ", "水パーマ", "スパイラルパーマ", "ツイストパーマ", "ツイストスパイラル", "波巻きパーマ", "ニュアンスパーマ"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_straight_menu",
@@ -594,10 +654,12 @@
         "exact": [],
         "keywords": ["縮毛矯正", "ストレートパーマ", "ストパ", "酸性ストレート", "前髪縮毛矯正", "部分縮毛矯正"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_treatment_menu",
@@ -608,10 +670,12 @@
         "exact": [],
         "keywords": ["トリートメント", "クイックトリートメント", "内部補修トリートメント", "システムトリートメント", "髪質改善トリートメント", "酸熱トリートメント"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_headspa_menu",
@@ -622,10 +686,12 @@
         "exact": [],
         "keywords": ["ヘッドスパ", "クイックスパ", "炭酸ヘッドスパ", "エイジングケアスパ"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_set_menu",
@@ -636,10 +702,12 @@
         "exact": [],
         "keywords": ["ヘアセット", "セット", "アップスタイル", "巻き髪", "ブロー", "スタイリング"]
       },
-      "response": {"text": "詳細はサービスメニューからご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューからご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_shampoo_menu",
@@ -650,10 +718,12 @@
         "exact": [],
         "keywords": ["シャンプー", "炭酸シャンプー", "頭皮ケア", "スカルプケア"]
       },
-      "response": {"text": "詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_mens_menu",
@@ -664,10 +734,12 @@
         "exact": [],
         "keywords": ["メンズカット", "メンズパーマ", "フェードカット", "眉カット"]
       },
-      "response": {"text": "メンズ向けメニューもご用意しております。詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "メンズ向けメニューもご用意しております。詳細はサービスメニューをご確認ください。"
+      },
       "priority": 82,
       "tags": ["kb", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_staff_info",
@@ -678,10 +750,12 @@
         "exact": [],
         "keywords": ["スタッフ", "スタイリスト", "担当者", "誰がいる"]
       },
-      "response": {"text": "スタッフの詳細はスタッフ紹介をご覧ください。"},
+      "response": {
+        "text": "スタッフの詳細はスタッフ紹介をご覧ください。"
+      },
       "priority": 85,
       "tags": ["kb", "staff"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_nomination_available",
@@ -692,10 +766,12 @@
         "exact": [],
         "keywords": ["指名できる", "担当選べる", "指名したい"]
       },
-      "response": {"text": "ご指名可能です"},
+      "response": {
+        "text": "ご指名可能です"
+      },
       "priority": 85,
       "tags": ["kb", "staff"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_nomination_fee",
@@ -706,10 +782,12 @@
         "exact": [],
         "keywords": ["指名料", "指名料金"]
       },
-      "response": {"text": "{nomination_fee}"},
+      "response": {
+        "text": "{nomination_fee}"
+      },
       "priority": 85,
       "tags": ["kb", "staff"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_no_preference",
@@ -720,10 +798,12 @@
         "exact": [],
         "keywords": ["指名なし", "おまかせ", "担当こだわりない"]
       },
-      "response": {"text": "指名なしでも大丈夫です。お店側で最適なスタイリストをご案内いたします。"},
+      "response": {
+        "text": "指名なしでも大丈夫です。お店側で最適なスタイリストをご案内いたします。"
+      },
       "priority": 85,
       "tags": ["kb", "staff"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_price",
@@ -734,10 +814,12 @@
         "exact": [],
         "keywords": ["料金", "値段", "いくら", "金額"]
       },
-      "response": {"text": "料金はメニューにより異なります。詳細はサービスメニューをご確認ください。"},
+      "response": {
+        "text": "料金はメニューにより異なります。詳細はサービスメニューをご確認ください。"
+      },
       "priority": 90,
       "tags": ["kb", "price"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_extra_fee",
@@ -748,10 +830,12 @@
         "exact": [],
         "keywords": ["追加料金", "プラス料金", "追加でかかる"]
       },
-      "response": {"text": "髪の長さ・ブリーチ回数・薬剤使用量によって追加料金が発生する場合がございます。事前にご案内いたします。"},
+      "response": {
+        "text": "髪の長さ・ブリーチ回数・薬剤使用量によって追加料金が発生する場合がございます。事前にご案内いたします。"
+      },
       "priority": 85,
       "tags": ["kb", "price"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_payment",
@@ -762,10 +846,12 @@
         "exact": [],
         "keywords": ["支払い方法", "カード使える", "現金", "電子マネー", "クレジットカード"]
       },
-      "response": {"text": "現金、各種クレジットカード、各種電子マネーをご利用いただけます。"},
+      "response": {
+        "text": "現金、各種クレジットカード、各種電子マネーをご利用いただけます。"
+      },
       "priority": 90,
       "tags": ["kb", "payment"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_receipt",
@@ -776,10 +862,12 @@
         "exact": [],
         "keywords": ["領収書", "レシート", "領収証"]
       },
-      "response": {"text": "領収書の発行が可能です。"},
+      "response": {
+        "text": "領収書の発行が可能です。"
+      },
       "priority": 85,
       "tags": ["kb", "payment"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_gender_ok",
@@ -790,10 +878,12 @@
         "exact": [],
         "keywords": ["メンズOK", "男いける", "女性専用", "女性のみ", "男性でも大丈夫"]
       },
-      "response": {"text": "男性・女性どちらのお客様もご利用いただけます。"},
+      "response": {
+        "text": "男性・女性どちらのお客様もご利用いただけます。"
+      },
       "priority": 85,
       "tags": ["kb", "eligibility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_child_ok",
@@ -804,10 +894,12 @@
         "exact": [],
         "keywords": ["子供OK", "子供いける", "お子様OK", "子連れ", "子ども連れ"]
       },
-      "response": {"text": "お子様のご来店も可能です。"},
+      "response": {
+        "text": "お子様のご来店も可能です。"
+      },
       "priority": 85,
       "tags": ["kb", "eligibility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_pregnancy",
@@ -818,10 +910,12 @@
         "exact": [],
         "keywords": ["妊娠中対応", "妊娠中", "妊婦", "妊娠してても大丈夫"]
       },
-      "response": {"text": "体調と医師の指示を優先し、無理のない範囲でご案内いたします。当日も遠慮なくご相談ください。"},
+      "response": {
+        "text": "体調と医師の指示を優先し、無理のない範囲でご案内いたします。当日も遠慮なくご相談ください。"
+      },
       "priority": 84,
       "tags": ["kb", "eligibility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_companion",
@@ -832,10 +926,12 @@
         "exact": [],
         "keywords": ["一緒に行ける", "同伴", "付き添い", "付き添いあり"]
       },
-      "response": {"text": "付き添いの方のご来店も可能です。"},
+      "response": {
+        "text": "付き添いの方のご来店も可能です。"
+      },
       "priority": 84,
       "tags": ["kb", "eligibility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_wifi",
@@ -846,10 +942,12 @@
         "exact": [],
         "keywords": ["wifi", "Wi-Fi", "ネット使える", "ネット"]
       },
-      "response": {"text": "Wi-Fiをご利用いただけます。"},
+      "response": {
+        "text": "Wi-Fiをご利用いただけます。"
+      },
       "priority": 84,
       "tags": ["kb", "facility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_outlet",
@@ -860,10 +958,12 @@
         "exact": [],
         "keywords": ["コンセント", "充電", "充電できる"]
       },
-      "response": {"text": "コンセントのご利用も可能です。"},
+      "response": {
+        "text": "コンセントのご利用も可能です。"
+      },
       "priority": 84,
       "tags": ["kb", "facility"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_new_customer_coupon",
@@ -874,10 +974,12 @@
         "exact": [],
         "keywords": ["新規クーポン", "初回クーポン", "初回割引"]
       },
-      "response": {"text": "{new_customer_coupon}"},
+      "response": {
+        "text": "{new_customer_coupon}"
+      },
       "priority": 85,
       "tags": ["kb", "benefit"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_revisit_benefit",
@@ -888,10 +990,12 @@
         "exact": [],
         "keywords": ["再来特典", "再来クーポン", "2回目特典"]
       },
-      "response": {"text": "来店30日以内の再来で、トリートメント¥1,000OFFとなります。"},
+      "response": {
+        "text": "来店30日以内の再来で、トリートメント¥1,000OFFとなります。"
+      },
       "priority": 85,
       "tags": ["kb", "benefit"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_birthday_benefit",
@@ -902,10 +1006,12 @@
         "exact": [],
         "keywords": ["誕生日特典", "誕生月特典", "バースデー特典"]
       },
-      "response": {"text": "誕生月は施術料金5％OFFです。身分証不要で、月1回までご利用いただけます。"},
+      "response": {
+        "text": "誕生月は施術料金5％OFFです。身分証不要で、月1回までご利用いただけます。"
+      },
       "priority": 85,
       "tags": ["kb", "benefit"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_referral_benefit",
@@ -916,10 +1022,12 @@
         "exact": [],
         "keywords": ["紹介割", "紹介特典", "友達紹介"]
       },
-      "response": {"text": "紹介者・被紹介者ともに¥500OFFです。同時使用は不可となります。"},
+      "response": {
+        "text": "紹介者・被紹介者ともに¥500OFFです。同時使用は不可となります。"
+      },
       "priority": 85,
       "tags": ["kb", "benefit"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_points",
@@ -930,10 +1038,12 @@
         "exact": [],
         "keywords": ["ポイント", "ショップカード", "LINEポイント"]
       },
-      "response": {"text": "LINEショップカードをご利用いただけます。来店1回で1pt、5ptで¥1,000OFFです。"},
+      "response": {
+        "text": "LINEショップカードをご利用いただけます。来店1回で1pt、5ptで¥1,000OFFです。"
+      },
       "priority": 85,
       "tags": ["kb", "benefit"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_allergy",
@@ -944,10 +1054,12 @@
         "exact": [],
         "keywords": ["アレルギー対応", "アレルギー", "薬剤心配", "肌弱い"]
       },
-      "response": {"text": "パッチテストや薬剤調整をご提案いたします。無理な施術は行わない方針です。"},
+      "response": {
+        "text": "パッチテストや薬剤調整をご提案いたします。無理な施術は行わない方針です。"
+      },
       "priority": 84,
       "tags": ["kb", "policy"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_bring_own_chemicals",
@@ -958,10 +1070,12 @@
         "exact": [],
         "keywords": ["持ち込み薬剤", "薬剤持ち込み", "持ち込み"]
       },
-      "response": {"text": "衛生・品質管理上、薬剤のお持ち込みは原則お断りしております。"},
+      "response": {
+        "text": "衛生・品質管理上、薬剤のお持ち込みは原則お断りしております。"
+      },
       "priority": 84,
       "tags": ["kb", "policy"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "kb_guarantee",
@@ -972,12 +1086,13 @@
         "exact": [],
         "keywords": ["仕上がり保証", "お直し", "やり直し"]
       },
-      "response": {"text": "7日以内は無償でお直しのご相談が可能です。なお、大幅なデザイン変更は対象外となります。"},
+      "response": {
+        "text": "7日以内は無償でお直しのご相談が可能です。なお、大幅なデザイン変更は対象外となります。"
+      },
       "priority": 84,
       "tags": ["kb", "policy"],
-      "enabled": True
+      "enabled": true
     },
-
     {
       "id": "sales_menu_undecided",
       "type": "sales",
@@ -993,7 +1108,7 @@
       },
       "priority": 70,
       "tags": ["sales", "menu"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_first_visit_anxiety",
@@ -1010,7 +1125,7 @@
       },
       "priority": 70,
       "tags": ["sales", "anxiety"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_price_anxiety",
@@ -1027,7 +1142,7 @@
       },
       "priority": 70,
       "tags": ["sales", "anxiety", "price"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_time_anxiety",
@@ -1044,7 +1159,7 @@
       },
       "priority": 70,
       "tags": ["sales", "anxiety", "time"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_finish_anxiety",
@@ -1061,7 +1176,7 @@
       },
       "priority": 70,
       "tags": ["sales", "anxiety", "finish"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_popular_menu_prompt",
@@ -1078,7 +1193,7 @@
       },
       "priority": 68,
       "tags": ["sales", "proposal"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_consultation_cta",
@@ -1095,7 +1210,7 @@
       },
       "priority": 68,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_same_day_cta",
@@ -1112,7 +1227,7 @@
       },
       "priority": 68,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_no_nomination_relief",
@@ -1129,7 +1244,7 @@
       },
       "priority": 68,
       "tags": ["sales", "anxiety", "staff"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_booking_hesitation",
@@ -1146,7 +1261,7 @@
       },
       "priority": 68,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_natural_close_general",
@@ -1162,7 +1277,7 @@
       },
       "priority": 60,
       "tags": ["sales", "close"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_natural_close_consult",
@@ -1178,7 +1293,7 @@
       },
       "priority": 60,
       "tags": ["sales", "close"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_natural_close_early",
@@ -1194,7 +1309,7 @@
       },
       "priority": 60,
       "tags": ["sales", "close"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_upsell_treatment_soft",
@@ -1211,7 +1326,7 @@
       },
       "priority": 66,
       "tags": ["sales", "upsell"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_upsell_color_care",
@@ -1228,7 +1343,7 @@
       },
       "priority": 66,
       "tags": ["sales", "upsell", "color"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_upsell_perm_care",
@@ -1245,7 +1360,7 @@
       },
       "priority": 66,
       "tags": ["sales", "upsell", "perm"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_repeat_motivation",
@@ -1261,7 +1376,7 @@
       },
       "priority": 64,
       "tags": ["sales", "repeat"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_new_customer_relief",
@@ -1278,7 +1393,7 @@
       },
       "priority": 66,
       "tags": ["sales", "anxiety"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_waiting_mitigation",
@@ -1295,7 +1410,7 @@
       },
       "priority": 66,
       "tags": ["sales", "anxiety"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_mens_relief",
@@ -1311,7 +1426,7 @@
       },
       "priority": 64,
       "tags": ["sales", "anxiety"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_family_relief",
@@ -1327,7 +1442,7 @@
       },
       "priority": 64,
       "tags": ["sales", "anxiety"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_consult_first_then_menu",
@@ -1344,7 +1459,7 @@
       },
       "priority": 66,
       "tags": ["sales", "proposal"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_soft_commitment",
@@ -1360,7 +1475,7 @@
       },
       "priority": 62,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_high_intent_close",
@@ -1376,7 +1491,7 @@
       },
       "priority": 62,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_lost_prevention",
@@ -1393,7 +1508,7 @@
       },
       "priority": 62,
       "tags": ["sales", "retention"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_popular_time_prompt",
@@ -1409,7 +1524,7 @@
       },
       "priority": 62,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_finish_with_support",
@@ -1425,7 +1540,7 @@
       },
       "priority": 60,
       "tags": ["sales", "close"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_menu_popularity_for_indecisive",
@@ -1442,7 +1557,7 @@
       },
       "priority": 66,
       "tags": ["sales", "proposal"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_care_value_explanation",
@@ -1459,7 +1574,7 @@
       },
       "priority": 64,
       "tags": ["sales", "upsell"],
-      "enabled": True
+      "enabled": true
     },
     {
       "id": "sales_booking_after_question",
@@ -1475,7 +1590,7 @@
       },
       "priority": 62,
       "tags": ["sales", "cta"],
-      "enabled": True
+      "enabled": true
     }
   ]
 }
