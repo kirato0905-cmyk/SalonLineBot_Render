@@ -23,3 +23,11 @@
   },
   "reservation_ui_limit_days": 45
 }
+
+{
+  "reservation_rules": {
+    "create_limit_hours": 24,
+    "change_limit_hours": 24,
+    "cancel_limit_hours": 24
+  }
+}
