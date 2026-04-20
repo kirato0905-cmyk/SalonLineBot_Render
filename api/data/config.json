@@ -1,0 +1,112 @@
+{
+  "salon": {
+    "timezone": "Asia/Tokyo"
+  },
+  "calendar": {
+    "business_hours": {
+      "mon": [],
+      "tue": [
+        { "start": "10:00", "end": "13:00" },
+        { "start": "14:00", "end": "20:00" }
+      ],
+      "wed": [
+        { "start": "10:00", "end": "13:00" },
+        { "start": "14:00", "end": "20:00" }
+      ],
+      "thu": [
+        { "start": "10:00", "end": "13:00" },
+        { "start": "14:00", "end": "20:00" }
+      ],
+      "fri": [
+        { "start": "10:00", "end": "13:00" },
+        { "start": "14:00", "end": "20:00" }
+      ],
+      "sat": [
+        { "start": "10:00", "end": "20:00" }
+      ],
+      "sun": []
+    },
+    "monthly_closed": [
+      { "weekday": "wed", "weeks": [2] }
+    ],
+    "closed_dates": [
+      "2026-04-24"
+    ],
+    "special_hours": [
+      {
+        "date": "2026-04-23",
+        "hours": [
+          { "start": "12:00", "end": "18:00" }
+        ]
+      }
+    ]
+  },
+  "booking": {
+    "slot_minutes": 30,
+    "reservation_ui_limit_days": 45,
+    "reservation_rules": {
+      "create_limit_hours": 2,
+      "change_limit_hours": 24,
+      "cancel_limit_hours": 24
+    },
+    "recommendation_rules": {
+      "preferred_time_ranges": [
+        { "start": "10:00", "end": "12:00", "score": 20 },
+        { "start": "12:00", "end": "15:00", "score": 15 },
+        { "start": "15:00", "end": "17:00", "score": 8 }
+      ],
+      "business_hours_bonus": {
+        "morning_bonus": 8,
+        "midday_bonus": 12,
+        "evening_penalty": -5
+      },
+      "recommend_count": 2
+    }
+  },
+  "services": {
+    "service_1": {
+      "id": "cut",
+      "name": "カット",
+      "duration": 60,
+      "price": 3000
+    },
+    "service_2": {
+      "id": "color",
+      "name": "カラー",
+      "duration": 120,
+      "price": 8000
+    },
+    "service_3": {
+      "id": "perm",
+      "name": "パーマ",
+      "duration": 150,
+      "price": 12000
+    },
+    "service_4": {
+      "id": "treatment",
+      "name": "トリートメント",
+      "duration": 90,
+      "price": 5000
+    },
+    "service_5": {
+      "id": "cut_color",
+      "name": "カット＋カラー",
+      "duration": 150,
+      "price": 10000
+    }
+  },
+  "staff": {
+    "staff_1": {
+      "name": "山田",
+      "calendar_id": "8a1c814ebc08c69ded56064a98e0407c895ed5af0394946ce58c5139dce4be3b@group.calendar.google.com"
+    },
+    "staff_2": {
+      "name": "佐藤",
+      "calendar_id": "62e2e039668e3997d19038833582d81a71c7b787cc34dc853eb8c22a2e4ed7b5@group.calendar.google.com"
+    },
+    "staff_3": {
+      "name": "鈴木",
+      "calendar_id": "1658be0b1d3b4707b5488522d51f533ad47ec794977181ef1050a629c2cf1da6@group.calendar.google.com"
+    }
+  }
+}
