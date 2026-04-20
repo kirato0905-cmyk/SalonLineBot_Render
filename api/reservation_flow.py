@@ -21,6 +21,11 @@ Updated:
 - settings.json is reloaded on every rule read for immediate reflection
 - Modification/cancellation selection also checks deadline immediately
 - If modification/cancellation is not allowed due to deadline, that flow ends immediately
+
+New:
+- In time selection quick replies, options past the reservation deadline are not shown
+- Deadline-aware filtering reflects settings.json immediately
+- Date buttons also avoid dates that have no selectable time left after deadline filtering
 """
 
 import re
@@ -361,6 +366,44 @@ class ReservationFlow:
 
         return sorted(start_times_set)
 
+    def _filter_time_options_by_deadline(
+        self,
+        user_id: str,
+        selected_date: str,
+        time_options: List[str],
+    ) -> List[str]:
+        """
+        Remove start times that already passed the reservation deadline.
+        settings.json is reflected immediately because _check_advance_booking_time()
+        reloads the reservation rule every time.
+        """
+        valid_times = []
+
+        for start_time in time_options:
+            is_valid, _ = self._check_advance_booking_time(
+                selected_date,
+                start_time,
+                user_id,
+            )
+            if is_valid:
+                valid_times.append(start_time)
+
+        return valid_times
+
+    def _generate_valid_time_options(
+        self,
+        user_id: str,
+        selected_date: str,
+        filtered_periods: List[Dict[str, Any]],
+        service_duration: int,
+    ) -> List[str]:
+        time_options = self._build_time_options_30min(filtered_periods, service_duration)
+        return self._filter_time_options_by_deadline(
+            user_id=user_id,
+            selected_date=selected_date,
+            time_options=time_options,
+        )
+
     def _build_time_selection_quick_reply(
         self,
         user_id: str,
@@ -572,7 +615,15 @@ class ReservationFlow:
         try:
             slots = self._get_available_slots(date_str, staff_name, user_id)
             available_periods = [slot for slot in slots if slot.get("available")]
-            return bool(self._periods_fittable_for_service(available_periods, service_duration))
+            filtered_periods = self._periods_fittable_for_service(available_periods, service_duration)
+
+            time_options = self._generate_valid_time_options(
+                user_id=user_id,
+                selected_date=date_str,
+                filtered_periods=filtered_periods,
+                service_duration=service_duration,
+            )
+            return bool(time_options)
         except Exception as e:
             logging.error(f"[date UI] slot check failed for new booking {date_str}: {e}")
             return False
@@ -838,7 +889,26 @@ class ReservationFlow:
                 error_prefix=err,
             )
 
-        time_options = self._build_time_options_30min(filtered_periods, service_duration)
+        time_options = self._generate_valid_time_options(
+            user_id=user_id,
+            selected_date=selected_date,
+            filtered_periods=filtered_periods,
+            service_duration=service_duration,
+        )
+
+        if not time_options:
+            self.user_states[user_id]["step"] = "date_selection"
+            err = (
+                f"申し訳ございませんが、{selected_date}は締切時間を過ぎたため、"
+                f"現在ご案内可能な時間がありません。\n\n"
+                f"他の日付をお選びください。"
+            )
+            return self._build_date_week_selection_message(
+                user_id,
+                context="new_reservation",
+                error_prefix=err,
+            )
+
         self.user_states[user_id]["time_options"] = time_options
         self.user_states[user_id]["time_slot_page"] = 0
         self.user_states[user_id]["time_selection_date"] = selected_date
@@ -1359,16 +1429,6 @@ class ReservationFlow:
             return self._build_date_week_selection_message(user_id, context="new_reservation")
 
         if message_normalized in ("前へ", "次へ"):
-            time_options = self.user_states[user_id].get("time_options", [])
-            current_page = self.user_states[user_id].get("time_slot_page", 0)
-            per_page = 8
-            total_pages = max(1, (len(time_options) + per_page - 1) // per_page)
-
-            if message_normalized == "前へ":
-                new_page = max(0, current_page - 1)
-            else:
-                new_page = min(total_pages - 1, current_page + 1)
-
             selected_date = self.user_states[user_id].get(
                 "time_selection_date",
                 self.user_states[user_id]["data"]["date"],
@@ -1380,6 +1440,43 @@ class ReservationFlow:
                 if sid
                 else self.user_states[user_id].get("time_selection_service_duration", 60)
             )
+
+            staff_name = self.user_states[user_id]["data"].get("staff")
+            available_slots = self._get_available_slots(selected_date, staff_name, user_id)
+            available_periods = [slot for slot in available_slots if slot["available"]]
+            filtered_periods = self._periods_fittable_for_service(available_periods, service_duration)
+
+            time_options = self._generate_valid_time_options(
+                user_id=user_id,
+                selected_date=selected_date,
+                filtered_periods=filtered_periods,
+                service_duration=service_duration,
+            )
+
+            if not time_options:
+                self.user_states[user_id]["step"] = "date_selection"
+                err = (
+                    f"申し訳ございませんが、{selected_date}は締切時間を過ぎたため、"
+                    f"現在ご案内可能な時間がありません。\n\n"
+                    f"他の日付をお選びください。"
+                )
+                return self._build_date_week_selection_message(
+                    user_id,
+                    context="new_reservation",
+                    error_prefix=err,
+                )
+
+            self.user_states[user_id]["time_options"] = time_options
+            self.user_states[user_id]["time_filtered_periods"] = filtered_periods
+
+            current_page = self.user_states[user_id].get("time_slot_page", 0)
+            per_page = 8
+            total_pages = max(1, (len(time_options) + per_page - 1) // per_page)
+
+            if message_normalized == "前へ":
+                new_page = max(0, current_page - 1)
+            else:
+                new_page = min(total_pages - 1, current_page + 1)
 
             text = f"""{selected_date}ですね👌
 {service_name}（{service_duration}分）の空き状況はこちら。
