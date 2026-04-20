@@ -15,7 +15,7 @@ Added:
   do not enter modify/cancel state until a valid reservation list exists
 
 Updated:
-- Reservation deadline rules are now managed by data/settings.json
+- Reservation deadline rules are managed by data/settings.json
 - Separate limits for create / change / cancel
 - Invalid or missing settings fallback to 2 hours
 - settings.json is reloaded on every rule read for immediate reflection
@@ -26,12 +26,14 @@ New:
 - In time selection quick replies, options past the reservation deadline are not shown
 - Deadline-aware filtering reflects settings.json immediately
 - Date buttons also avoid dates that have no selectable time left after deadline filtering
-- Time selection message is dynamically built from actual available quick reply options
+- Time selection message is dynamically built from actual available options
 - Revenue-max recommendation scoring:
   - nearer valid times are prioritized
   - preferred time ranges from settings.json get bonus
   - balanced daytime slots get bonus
   - late slots can receive penalty
+- Quick replies keep all valid time options
+- LINE message text only is compressed for readability (roughly 1-hour spacing)
 """
 
 import re
@@ -305,11 +307,6 @@ class ReservationFlow:
         except Exception:
             return None
 
-    def _safe_get_now_tokyo(self):
-        import pytz
-        tokyo_tz = pytz.timezone("Asia/Tokyo")
-        return datetime.now(tokyo_tz)
-
     def _get_preferred_time_range_bonus(self, start_time: str) -> int:
         try:
             rules = self._get_recommendation_rules()
@@ -422,7 +419,6 @@ class ReservationFlow:
 
             days_diff = (candidate_dt.date() - now_dt.date()).days
 
-            # Same-day: heavily favor near future
             if days_diff == 0:
                 if diff_minutes <= 180:
                     return 60
@@ -432,7 +428,6 @@ class ReservationFlow:
                     return 30
                 return 15
 
-            # Next day
             if days_diff == 1:
                 if candidate_dt.hour < 12:
                     return 28
@@ -440,11 +435,9 @@ class ReservationFlow:
                     return 24
                 return 18
 
-            # Within a few days
             if days_diff <= 3:
                 return 12
 
-            # Beyond that, mild baseline
             return 5
         except Exception as e:
             logging.warning(f"Recency bonus error: {e}")
@@ -456,15 +449,13 @@ class ReservationFlow:
         start_time: str,
     ) -> int:
         score = 0
-
         score += self._get_recency_bonus(selected_date, start_time)
         score += self._get_preferred_time_range_bonus(start_time)
         score += self._get_daytime_bonus(start_time)
 
-        # Tiny tie-breaker: earlier time wins when scores are same
         minutes = self._time_to_minutes(start_time)
         if minutes is not None:
-            score += max(0, 1_000 - minutes) // 1_000  # basically 0 or 1, safe tie-break
+            score += max(0, 1000 - minutes) // 1000
 
         return score
 
@@ -490,6 +481,55 @@ class ReservationFlow:
         except Exception as e:
             logging.warning(f"Sort time options for recommendation failed: {e}")
             return sorted(time_options)
+
+    def _compress_time_options_for_text(
+        self,
+        time_options: List[str],
+        recommend_count: int = 2,
+        other_count: int = 3,
+    ) -> List[str]:
+        """
+        Compress only message text display for readability.
+        Quick reply options remain unchanged.
+        Prefer about 1-hour spacing while preserving recommendation order.
+        """
+        if not time_options:
+            return []
+
+        max_count = recommend_count + other_count
+        if len(time_options) <= max_count:
+            return time_options
+
+        selected: List[str] = []
+        selected_minutes: List[int] = []
+
+        for t in time_options:
+            t_min = self._time_to_minutes(t)
+            if t_min is None:
+                continue
+
+            if not selected:
+                selected.append(t)
+                selected_minutes.append(t_min)
+                if len(selected) >= max_count:
+                    break
+                continue
+
+            if all(abs(t_min - s_min) >= 60 for s_min in selected_minutes):
+                selected.append(t)
+                selected_minutes.append(t_min)
+                if len(selected) >= max_count:
+                    break
+
+        if len(selected) < max_count:
+            for t in time_options:
+                if t in selected:
+                    continue
+                selected.append(t)
+                if len(selected) >= max_count:
+                    break
+
+        return selected[:max_count]
 
     def _get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
         if not service_id:
@@ -659,7 +699,9 @@ class ReservationFlow:
     ) -> str:
         """
         Build dynamic time selection message from currently selectable time options.
-        Recommendation order is already optimized for conversion + business benefit.
+        Recommendation order is already optimized.
+        Only the LINE message text is compressed for readability.
+        Quick reply options remain unchanged.
         """
         if not time_options:
             return (
@@ -668,8 +710,16 @@ class ReservationFlow:
             )
 
         recommend_count = self._get_recommend_count(2)
-        recommended = time_options[:recommend_count]
-        others = time_options[recommend_count:]
+        other_count = 3
+
+        display_options = self._compress_time_options_for_text(
+            time_options=time_options,
+            recommend_count=recommend_count,
+            other_count=other_count,
+        )
+
+        recommended = display_options[:recommend_count]
+        others = display_options[recommend_count:recommend_count + other_count]
 
         lines = [
             f"{selected_date}ですね👌",
@@ -699,6 +749,10 @@ class ReservationFlow:
         text: str,
         page: int,
     ) -> Dict[str, Any]:
+        """
+        Quick reply keeps all valid options.
+        Only message text is compressed.
+        """
         time_options = self.user_states[user_id].get("time_options", [])
         per_page = 8
         total_pages = max(1, (len(time_options) + per_page - 1) // per_page)
