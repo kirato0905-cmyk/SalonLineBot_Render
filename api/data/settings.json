@@ -37,8 +37,21 @@
   },
   "reservation_ui_limit_days": 45,
   "reservation_rules": {
-    "create_limit_hours": 15,
-    "change_limit_hours": 15,
-    "cancel_limit_hours": 15
+    "create_limit_hours": 2,
+    "change_limit_hours": 24,
+    "cancel_limit_hours": 24
+  },
+  "recommendation_rules": {
+    "preferred_time_ranges": [
+      { "start": "10:00", "end": "12:00", "score": 20 },
+      { "start": "12:00", "end": "15:00", "score": 15 },
+      { "start": "15:00", "end": "17:00", "score": 8 }
+    ],
+    "business_hours_bonus": {
+      "morning_bonus": 8,
+      "midday_bonus": 12,
+      "evening_penalty": -5
+    },
+    "recommend_count": 2
   }
 }
