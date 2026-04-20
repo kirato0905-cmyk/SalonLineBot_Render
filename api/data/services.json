@@ -4,31 +4,31 @@
       "id": "cut",
       "name": "カット",
       "duration": 60,
-      "price": 3000,
+      "price": 3000
     },
     "service_2": {
       "id": "color",
       "name": "カラー",
       "duration": 120,
-      "price": 8000,
+      "price": 8000
     },
     "service_3": {
       "id": "perm",
       "name": "パーマ",
       "duration": 150,
-      "price": 12000,
+      "price": 12000
     },
     "service_4": {
       "id": "treatment",
       "name": "トリートメント",
       "duration": 90,
-      "price": 5000,
+      "price": 5000
     },
     "service_5": {
       "id": "cut_color",
       "name": "カット＋カラー",
       "duration": 150,
-      "price": 10000,
+      "price": 10000
     }
   },
    "staff": {
