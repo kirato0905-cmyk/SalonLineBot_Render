@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional, List
 import faiss
 from sentence_transformers import SentenceTransformer
 
-from unified_kb_loader import UnifiedKBLoader
+from api.unified_kb_loader import UnifiedKBLoader
 
 
 class RAGFAQ:
