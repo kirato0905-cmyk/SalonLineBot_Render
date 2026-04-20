@@ -11,7 +11,7 @@ from linebot.v3.messaging import (
     QuickReplyItem,
 )
 
-from unified_kb_loader import UnifiedKBLoader
+from api.unified_kb_loader import UnifiedKBLoader
 
 
 def _get_loader() -> UnifiedKBLoader:
