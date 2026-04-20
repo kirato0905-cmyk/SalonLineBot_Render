@@ -1,6 +1,4 @@
-import json, textwrap, os
-
-data = {
+{
   "version": "1.0.0",
   "store_settings": {
     "store_name": "SalonAI 表参道店",
@@ -1481,10 +1479,3 @@ data = {
     }
   ]
 }
-
-path = "/mnt/data/unified_kb.json"
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
-
-print(path)
-print(f"entries={len(data['entries'])}")
