@@ -641,18 +641,88 @@ class ReservationFlow:
 
         return valid_times
 
+    def _filter_time_options_by_actual_availability(
+        self,
+        user_id: str,
+        selected_date: str,
+        staff_name: Optional[str],
+        time_options: List[str],
+        service_duration: int,
+    ) -> List[str]:
+        valid_times = []
+
+        original_reservation = None
+        exclude_reservation_id = None
+        if user_id and user_id in self.user_states:
+            state = self.user_states[user_id]
+            if state.get("is_modification", False):
+                original_reservation = state.get("original_reservation")
+                if original_reservation and original_reservation.get("date") == selected_date:
+                    exclude_reservation_id = original_reservation.get("reservation_id")
+
+        service_id = self._get_current_service_id(user_id) if user_id else None
+
+        for start_time in time_options:
+            end_time = self._calculate_optimal_end_time(start_time, service_duration)
+
+            if staff_name and not self._is_no_preference_staff(staff_name):
+                staff_ok = self.google_calendar.check_staff_availability_for_time(
+                    date_str=selected_date,
+                    start_time=start_time,
+                    end_time=end_time,
+                    staff_name=staff_name,
+                    exclude_reservation_id=exclude_reservation_id,
+                )
+                if not staff_ok:
+                    continue
+                resolved_staff_for_conflict_check = staff_name
+            else:
+                assignable_staff = self.google_calendar.find_assignable_staff(
+                    date_str=selected_date,
+                    start_time=start_time,
+                    end_time=end_time,
+                    service_id=service_id,
+                    exclude_reservation_id=exclude_reservation_id,
+                )
+                if not assignable_staff:
+                    continue
+                resolved_staff_for_conflict_check = assignable_staff
+
+            user_conflict = self.google_calendar.check_user_time_conflict(
+                selected_date,
+                start_time,
+                end_time,
+                user_id,
+                exclude_reservation_id,
+                resolved_staff_for_conflict_check,
+            )
+            if user_conflict:
+                continue
+
+            valid_times.append(start_time)
+
+        return valid_times
+
     def _generate_valid_time_options(
         self,
         user_id: str,
         selected_date: str,
         filtered_periods: List[Dict[str, Any]],
         service_duration: int,
+        staff_name: Optional[str] = None,
     ) -> List[str]:
         time_options = self._build_time_options_30min(filtered_periods, service_duration)
         time_options = self._filter_time_options_by_deadline(
             user_id=user_id,
             selected_date=selected_date,
             time_options=time_options,
+        )
+        time_options = self._filter_time_options_by_actual_availability(
+            user_id=user_id,
+            selected_date=selected_date,
+            staff_name=staff_name,
+            time_options=time_options,
+            service_duration=service_duration,
         )
         time_options = self._sort_time_options_for_recommendation(
             selected_date=selected_date,
@@ -1050,6 +1120,7 @@ class ReservationFlow:
                 selected_date=date_str,
                 filtered_periods=filtered_periods,
                 service_duration=service_duration,
+                staff_name=staff_name,
             )
             return bool(time_options)
         except Exception as e:
@@ -1326,6 +1397,7 @@ class ReservationFlow:
             selected_date=selected_date,
             filtered_periods=filtered_periods,
             service_duration=service_duration,
+            staff_name=staff_name,
         )
 
         if not time_options:
@@ -1883,6 +1955,7 @@ class ReservationFlow:
                 selected_date=selected_date,
                 filtered_periods=filtered_periods,
                 service_duration=service_duration,
+                staff_name=staff_name,
             )
 
             if not time_options:
