@@ -134,15 +134,18 @@ def send_faq_menu(reply_token, configuration):
 def get_faq_by_number(faq_number):
     """
     FAQ番号でFAQを取得
+    対応形式は Q1, Q2 のみ
+    - 半角/全角Qは許容
+    - 半角/全角数字は許容
+    - スペースは許容
+
     対応例:
     - Q1
     - q1
     - Q 1
     - q 1
-    - 1
-    - １
-    - Q１
-    - Ｑ２
+    - Ｑ１
+    - ｑ２
     """
     try:
         if faq_number is None:
@@ -164,11 +167,12 @@ def get_faq_by_number(faq_number):
             "７": "7",
             "８": "8",
             "９": "9",
+            "　": " ",
         })
         text = text.translate(trans)
 
-        # Q2 / q2 / Q 2 / 2 など
-        match = re.fullmatch(r"(?:[Qq]\s*)?(\d+)", text)
+        # Q1 / q1 / Q 1 / q 1 のみ許可
+        match = re.fullmatch(r"[Qq]\s*(\d+)", text)
         if not match:
             return None
 
