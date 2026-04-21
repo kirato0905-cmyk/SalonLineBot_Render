@@ -34,28 +34,60 @@
     "business_hours": {
       "mon": [],
       "tue": [
-        { "start": "10:00", "end": "13:00" },
-        { "start": "14:00", "end": "20:00" }
+        {
+          "start": "10:00",
+          "end": "13:00"
+        },
+        {
+          "start": "14:00",
+          "end": "20:00"
+        }
       ],
       "wed": [
-        { "start": "10:00", "end": "13:00" },
-        { "start": "14:00", "end": "20:00" }
+        {
+          "start": "10:00",
+          "end": "13:00"
+        },
+        {
+          "start": "14:00",
+          "end": "20:00"
+        }
       ],
       "thu": [
-        { "start": "10:00", "end": "13:00" },
-        { "start": "14:00", "end": "20:00" }
+        {
+          "start": "10:00",
+          "end": "13:00"
+        },
+        {
+          "start": "14:00",
+          "end": "20:00"
+        }
       ],
       "fri": [
-        { "start": "10:00", "end": "13:00" },
-        { "start": "14:00", "end": "20:00" }
+        {
+          "start": "10:00",
+          "end": "13:00"
+        },
+        {
+          "start": "14:00",
+          "end": "20:00"
+        }
       ],
       "sat": [
-        { "start": "10:00", "end": "20:00" }
+        {
+          "start": "10:00",
+          "end": "20:00"
+        }
       ],
       "sun": []
     },
     "monthly_closed": [
-      { "weekday": "wed", "weeks": [2] }
+      {
+        "weekday": "wed",
+        "weeks": [
+          2
+        ]
+      }
     ],
     "closed_dates": [
       "2026-04-24"
@@ -64,7 +96,10 @@
       {
         "date": "2026-04-23",
         "hours": [
-          { "start": "12:00", "end": "18:00" }
+          {
+            "start": "12:00",
+            "end": "18:00"
+          }
         ]
       }
     ]
@@ -79,9 +114,21 @@
     },
     "recommendation_rules": {
       "preferred_time_ranges": [
-        { "start": "10:00", "end": "12:00", "score": 20 },
-        { "start": "12:00", "end": "15:00", "score": 15 },
-        { "start": "15:00", "end": "17:00", "score": 8 }
+        {
+          "start": "10:00",
+          "end": "12:00",
+          "score": 20
+        },
+        {
+          "start": "12:00",
+          "end": "15:00",
+          "score": 15
+        },
+        {
+          "start": "15:00",
+          "end": "17:00",
+          "score": 8
+        }
       ],
       "business_hours_bonus": {
         "morning_bonus": 8,
@@ -160,7 +207,40 @@
       },
       "is_active": true,
       "order": 1,
-      "calendar_id": "8a1c814ebc08c69ded56064a98e0407c895ed5af0394946ce58c5139dce4be3b@group.calendar.google.com"
+      "calendar_id": "8a1c814ebc08c69ded56064a98e0407c895ed5af0394946ce58c5139dce4be3b@group.calendar.google.com",
+      "attendance": {
+        "mon": {
+          "is_working": false
+        },
+        "tue": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "wed": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "thu": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "fri": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "sat": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "sun": {
+          "is_working": false
+        }
+      }
     },
     "staff_2": {
       "staff_id": "staff_2",
@@ -178,7 +258,40 @@
       },
       "is_active": true,
       "order": 2,
-      "calendar_id": "62e2e039668e3997d19038833582d81a71c7b787cc34dc853eb8c22a2e4ed7b5@group.calendar.google.com"
+      "calendar_id": "62e2e039668e3997d19038833582d81a71c7b787cc34dc853eb8c22a2e4ed7b5@group.calendar.google.com",
+      "attendance": {
+        "mon": {
+          "is_working": false
+        },
+        "tue": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "wed": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "thu": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "fri": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "sat": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "sun": {
+          "is_working": false
+        }
+      }
     },
     "staff_3": {
       "staff_id": "staff_3",
@@ -191,7 +304,40 @@
       "sns": {},
       "is_active": true,
       "order": 3,
-      "calendar_id": "1658be0b1d3b4707b5488522d51f533ad47ec794977181ef1050a629c2cf1da6@group.calendar.google.com"
+      "calendar_id": "1658be0b1d3b4707b5488522d51f533ad47ec794977181ef1050a629c2cf1da6@group.calendar.google.com",
+      "attendance": {
+        "mon": {
+          "is_working": false
+        },
+        "tue": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "wed": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "thu": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "fri": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "sat": {
+          "start": "10:00",
+          "end": "20:00",
+          "is_working": true
+        },
+        "sun": {
+          "is_working": false
+        }
+      }
     }
   }
 }
