@@ -34,10 +34,10 @@ class ReservationFlow:
         self.services = self.config_data.get("services", {})
         self.staff_members = self.config_data.get("staff", {})
 
-        self.keywords_data = self._load_keywords_data()
-        self.intent_keywords = self.keywords_data.get("intent_keywords", {})
-        self.navigation_keywords = self.keywords_data.get("navigation_keywords", {})
-        self.confirmation_keywords = self.keywords_data.get("confirmation_keywords", {})
+        # config.json から直接取得
+        self.intent_keywords = self.config_data.get("intent_keywords", {})
+        self.navigation_keywords = self.config_data.get("navigation_keywords", {})
+        self.confirmation_keywords = self.config_data.get("confirmation_keywords", {})
 
         self.settings_data = self._extract_settings_from_config(self.config_data)
 
@@ -54,17 +54,6 @@ class ReservationFlow:
         except Exception as e:
             logging.error(f"Failed to load config data: {e}")
             raise RuntimeError(f"Cannot load config.json: {e}")
-
-    def _load_keywords_data(self) -> Dict[str, Any]:
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            keywords_file = os.path.join(current_dir, "data", "keywords.json")
-
-            with open(keywords_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logging.error(f"Failed to load keywords data: {e}")
-            raise RuntimeError(f"Cannot load keywords.json: {e}")
 
     def _extract_settings_from_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -85,8 +74,24 @@ class ReservationFlow:
         self.config_data = self._load_config_data()
         self.services = self.config_data.get("services", {})
         self.staff_members = self.config_data.get("staff", {})
+
+        # config.json 再読込時にキーワードも更新
+        self.intent_keywords = self.config_data.get("intent_keywords", {})
+        self.navigation_keywords = self.config_data.get("navigation_keywords", {})
+        self.confirmation_keywords = self.config_data.get("confirmation_keywords", {})
+
         self.settings_data = self._extract_settings_from_config(self.config_data)
         return self.settings_data
+
+    def _normalize_input_text(self, text: str) -> str:
+        if text is None:
+            return ""
+        return str(text).strip()
+
+    def _match_keyword_group(self, text: str, keywords: List[str]) -> bool:
+        normalized = self._normalize_input_text(text)
+        normalized_keywords = [self._normalize_input_text(k) for k in keywords if k]
+        return normalized in normalized_keywords
 
     def _get_reservation_limit_hours(self, rule_key: str, default: int = 2) -> int:
         """
@@ -556,7 +561,9 @@ class ReservationFlow:
         final_items.extend(list(items))
 
         if include_cancel:
-            final_items.append({"label": "キャンセル", "text": "キャンセル"})
+            flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
+            cancel_text = flow_cancel_keywords[0] if flow_cancel_keywords else "やめる"
+            final_items.append({"label": cancel_text, "text": cancel_text})
 
         return {"text": text, "quick_reply_items": final_items}
 
@@ -1222,10 +1229,7 @@ class ReservationFlow:
         return self._build_time_selection_quick_reply(user_id, text, page=0)
 
     def detect_intent(self, message: str, user_id: str = None) -> str:
-        message_normalized = message.strip()
-
-        if message_normalized in ["予約変更", "予約を変更", "予約変更したい"]:
-            return "modify"
+        message_normalized = self._normalize_input_text(message)
 
         if user_id and user_id in self.user_states:
             state = self.user_states[user_id]
@@ -1265,11 +1269,11 @@ class ReservationFlow:
         cancel_keywords = self.intent_keywords.get("cancel", [])
         modify_keywords = self.intent_keywords.get("modify", [])
 
-        if any(keyword in message_normalized for keyword in modify_keywords):
+        if self._match_keyword_group(message_normalized, modify_keywords):
             return "modify"
-        elif any(keyword in message_normalized for keyword in cancel_keywords):
+        elif self._match_keyword_group(message_normalized, cancel_keywords):
             return "cancel"
-        elif any(keyword in message_normalized for keyword in reservation_keywords):
+        elif self._match_keyword_group(message_normalized, reservation_keywords):
             return "reservation"
         else:
             return "general"
@@ -1279,9 +1283,9 @@ class ReservationFlow:
             self.user_states[user_id] = {"step": "start", "data": {"user_id": user_id}}
 
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        message_normalized = message.strip()
+        message_normalized = self._normalize_input_text(message)
 
-        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+        if self._match_keyword_group(message_normalized, flow_cancel_keywords):
             is_modification = self.user_states[user_id].get("is_modification", False)
             del self.user_states[user_id]
             if is_modification:
@@ -1462,8 +1466,8 @@ class ReservationFlow:
 
     def _handle_service_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        raw = message.strip()
-        if any(keyword in raw for keyword in flow_cancel_keywords):
+        raw = self._normalize_input_text(message)
+        if self._match_keyword_group(raw, flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
@@ -1501,13 +1505,13 @@ class ReservationFlow:
 
     def _handle_staff_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        message_normalized = message.strip()
-        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+        message_normalized = self._normalize_input_text(message)
+        if self._match_keyword_group(message_normalized, flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
         selected_staff = None
-        message_lower = message.strip().lower()
+        message_lower = message_normalized.lower()
 
         for staff_id, staff_data in self.staff_members.items():
             staff_name = staff_data.get("name", staff_id)
@@ -1541,8 +1545,8 @@ class ReservationFlow:
 
     def _handle_date_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        message_normalized = message.strip()
-        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+        message_normalized = self._normalize_input_text(message)
+        if self._match_keyword_group(message_normalized, flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
@@ -1690,8 +1694,8 @@ class ReservationFlow:
 
     def _handle_time_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        message_normalized = message.strip()
-        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+        message_normalized = self._normalize_input_text(message)
+        if self._match_keyword_group(message_normalized, flow_cancel_keywords):
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
@@ -1815,7 +1819,7 @@ class ReservationFlow:
 
 上記の空き時間から開始時間をお選びください。
 
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
+❌ 入力をやめる場合は「やめる」とお送りください"""
 
         is_valid_time, time_error_message = self._check_advance_booking_time(
             selected_date,
@@ -1848,7 +1852,7 @@ class ReservationFlow:
 
 上記の空き時間からお選びください。
 
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
+❌ 入力をやめる場合は「やめる」とお送りください"""
 
         user_time_conflict = self.google_calendar.check_user_time_conflict(
             selected_date,
@@ -1874,7 +1878,7 @@ class ReservationFlow:
 
 別の時間を選択してください。
 
-❌ 予約をキャンセルする場合は「キャンセル」とお送りください"""
+❌ 入力をやめる場合は「やめる」とお送りください"""
 
         self.user_states[user_id]["data"]["start_time"] = start_time
         self.user_states[user_id]["data"]["end_time"] = end_time
@@ -1969,14 +1973,17 @@ class ReservationFlow:
 
     def _handle_confirmation(self, user_id: str, message: str) -> str:
         yes_keywords = self.confirmation_keywords.get("yes", [])
-        if any(keyword in message for keyword in yes_keywords):
+        no_keywords = self.confirmation_keywords.get("no", [])
+        message_normalized = self._normalize_input_text(message)
+
+        if self._match_keyword_group(message_normalized, yes_keywords):
             reservation_data = self.user_states[user_id]["data"].copy()
 
             if "staff" not in reservation_data or not reservation_data.get("staff"):
                 logging.error(
                     f"[_handle_confirmation] ERROR: Staff not found in reservation_data! Data: {reservation_data}"
                 )
-                return "申し訳ございませんがエラーが発生しました。「キャンセル」とお送りして、もう一度最初からやり直してください。"
+                return "申し訳ございませんがエラーが発生しました。「やめる」とお送りして、もう一度最初からやり直してください。"
 
             sid = reservation_data.get("service_id") or self._get_service_id_by_name(reservation_data.get("service"))
             if sid:
@@ -2118,14 +2125,19 @@ class ReservationFlow:
 
             return response_text
 
+        elif self._match_keyword_group(message_normalized, no_keywords):
+            if user_id in self.user_states:
+                del self.user_states[user_id]
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
+
         return "「確定」とお送りください。"
 
     def _handle_modify_request(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         state = self.user_states.get(user_id)
 
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        message_normalized = message.strip()
-        if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+        message_normalized = self._normalize_input_text(message)
+        if self._match_keyword_group(message_normalized, flow_cancel_keywords):
             if user_id in self.user_states:
                 del self.user_states[user_id]
             return "予約変更をキャンセルいたします。またのご利用をお待ちしております。"
@@ -2249,20 +2261,20 @@ class ReservationFlow:
                     return (
                         f"申し訳ございませんが、その番号は選択できません。\n"
                         f"1から{len(reservations)}の番号を入力してください。\n\n"
-                        f"変更をやめる場合は「キャンセル」とお送りください。"
+                        f"変更をやめる場合は「やめる」とお送りください。"
                     )
             else:
                 return (
                     f"申し訳ございませんが、正しい形式で入力してください。\n"
                     f"番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXX）を入力してください。\n\n"
-                    f"変更をやめる場合は「キャンセル」とお送りください。"
+                    f"変更をやめる場合は「やめる」とお送りください。"
                 )
 
             if not selected_reservation:
                 return self._quick_reply_return(
                     "申し訳ございませんが、その予約IDが見つからないか、あなたの予約ではありません。\n"
                     "正しい予約IDまたは番号を入力してください。\n\n"
-                    "変更をやめる場合は「キャンセル」とお送りください。",
+                    "変更をやめる場合は「やめる」とお送りください。",
                     [],
                     include_cancel=True,
                     include_back=False,
@@ -2319,7 +2331,7 @@ class ReservationFlow:
             return (
                 "申し訳ございません。予約選択中にエラーが発生しました。"
                 "もう一度お試しください。\n\n"
-                "変更をやめる場合は「キャンセル」とお送りください。"
+                "変更をやめる場合は「やめる」とお送りください。"
             )
 
     def get_response(self, user_id: str, message: str) -> Optional[Union[str, Dict[str, Any]]]:
@@ -2359,8 +2371,8 @@ class ReservationFlow:
 
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         if message:
-            message_normalized = message.strip()
-            if any(keyword in message_normalized for keyword in flow_cancel_keywords):
+            message_normalized = self._normalize_input_text(message)
+            if self._match_keyword_group(message_normalized, flow_cancel_keywords):
                 if user_id in self.user_states:
                     del self.user_states[user_id]
                 return "予約取り消しをキャンセルいたします。またのご利用をお待ちしております。"
@@ -2548,14 +2560,15 @@ class ReservationFlow:
 
         yes_keywords = self.confirmation_keywords.get("yes", [])
         no_keywords = self.confirmation_keywords.get("no", [])
+        message_normalized = self._normalize_input_text(message)
 
-        if any(keyword in message for keyword in yes_keywords):
+        if self._match_keyword_group(message_normalized, yes_keywords):
             return self._execute_reservation_cancellation(user_id, reservation)
-        elif any(keyword in message for keyword in no_keywords):
+        elif self._match_keyword_group(message_normalized, no_keywords):
             del self.user_states[user_id]
             return "予約取り消しをキャンセルいたします。予約はそのまま残ります。\nまたのご利用をお待ちしております。"
         else:
-            return "「はい」または「確定」でキャンセルを確定するか、「キャンセル」で中止してください。"
+            return "「はい」または「確定」でキャンセルを確定するか、「やめる」で中止してください。"
 
     def _execute_reservation_cancellation(self, user_id: str, reservation: Dict[str, Any]) -> str:
         try:
@@ -2713,21 +2726,21 @@ def print_help():
     print("📖 INTERACTIVE TESTER HELP")
     print("=" * 60)
     print("🎯 RESERVATION FLOW COMMANDS:")
-    print("  • 予約したい, 予約お願い, 予約できますか - Start reservation")
+    print("  • 予約したい - Start reservation")
     print("  • カット, カラー, パーマ, トリートメント - Select service")
     print("  • 田中, 佐藤, 山田 - Select staff")
     print("  • 2025-01-15 (or any date) - Select date")
     print("  • 10:00, 10:30, 10時, 10時30分 - Select start time")
-    print("  • はい, 確定, お願い - Confirm reservation")
-    print("  • いいえ, キャンセル, やめる - Cancel reservation")
+    print("  • はい, 確定 - Confirm reservation")
+    print("  • いいえ, やめます - Decline confirmation")
     print("  • ← 戻る, 戻る - Go back one step in supported reservation flows")
     print()
     print("🔄 NAVIGATION COMMANDS:")
-    print("  • キャンセル, 取り消し, やめる - Cancel current flow")
+    print("  • やめる, 中止 - Cancel current flow")
     print()
     print("📋 RESERVATION MANAGEMENT:")
-    print("  • 予約キャンセル, 予約取り消し - Cancel existing reservation")
-    print("  • 予約変更, 予約修正 - Modify existing reservation (re-reservation flow)")
+    print("  • 予約取り消ししたい - Cancel existing reservation")
+    print("  • 予約変更したい - Modify existing reservation (re-reservation flow)")
     print()
     print("🛠️ TESTER COMMANDS:")
     print("  • help - Show this help message")
