@@ -2,6 +2,7 @@
 Google Calendar integration for salon reservations
 - Staff attendance aware version
 - No-preference staff assignment supported
+- Optimized with in-memory caches to reduce repeated Google Calendar API calls
 """
 import os
 import json
@@ -34,6 +35,12 @@ class GoogleCalendarHelper:
         self.calendar_id = None
         self.service = None
         self.service_account_email = None
+        self._config_mtime = self._get_config_mtime()
+
+        self._events_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._all_events_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._slots_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._assignable_staff_cache: Dict[str, Optional[str]] = {}
 
         try:
             self._authenticate()
@@ -45,6 +52,12 @@ class GoogleCalendarHelper:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(current_dir, "data", "config.json")
 
+    def _get_config_mtime(self) -> Optional[float]:
+        try:
+            return os.path.getmtime(self._config_path())
+        except Exception:
+            return None
+
     def _load_config_data(self) -> Dict[str, Any]:
         try:
             with open(self._config_path(), "r", encoding="utf-8") as f:
@@ -53,11 +66,23 @@ class GoogleCalendarHelper:
             print(f"Failed to load config data: {e}")
             return {}
 
-    def _reload_config_data(self) -> None:
+    def _clear_runtime_caches(self) -> None:
+        self._events_cache.clear()
+        self._all_events_cache.clear()
+        self._slots_cache.clear()
+        self._assignable_staff_cache.clear()
+
+    def _reload_config_data(self, force: bool = False) -> None:
+        current_mtime = self._get_config_mtime()
+        if not force and current_mtime is not None and self._config_mtime == current_mtime:
+            return
+
         self.config_data = self._load_config_data()
         self.timezone = self.config_data.get("salon", {}).get("timezone", get_timezone())
         self.staff_data = self.config_data.get("staff", {})
         self.services = self.config_data.get("services", {})
+        self._config_mtime = current_mtime
+        self._clear_runtime_caches()
 
     def _normalize_time_format(self, time_str: str) -> Optional[str]:
         try:
@@ -213,18 +238,6 @@ class GoogleCalendarHelper:
         target_date: date,
         staff_name: Optional[str] = None,
     ) -> List[Dict[str, str]]:
-        """
-        Returns effective bookable periods for the given date and staff:
-        - store business hours
-        - intersected with staff attendance when available
-
-        Rules:
-        - no staff_name / 指名なし / 未指定 => store business hours only
-        - attendance missing => fallback to store business hours
-        - weekday attendance missing => fallback to store business hours
-        - is_working=false => no periods
-        - is_working=true but start/end missing => invalid => no periods
-        """
         store_periods = get_hours_for_date(target_date) or []
         if not store_periods:
             return []
@@ -248,8 +261,7 @@ class GoogleCalendarHelper:
 
         if not isinstance(day_attendance, dict):
             logging.error(
-                f"[attendance] Invalid attendance data for staff={staff_name}, "
-                f"date={target_date}, weekday={weekday_key}: {day_attendance}"
+                f"[attendance] Invalid attendance data for staff={staff_name}, date={target_date}, weekday={weekday_key}: {day_attendance}"
             )
             return []
 
@@ -264,8 +276,7 @@ class GoogleCalendarHelper:
 
             if not staff_start or not staff_end:
                 logging.error(
-                    f"[attendance] Missing start/end for working day. "
-                    f"staff={staff_name}, date={target_date}, weekday={weekday_key}, data={day_attendance}"
+                    f"[attendance] Missing start/end for working day. staff={staff_name}, date={target_date}, weekday={weekday_key}, data={day_attendance}"
                 )
                 return []
 
@@ -326,6 +337,7 @@ class GoogleCalendarHelper:
             date_str = reservation_data["date"]
             service_name = reservation_data["service"]
             staff = reservation_data.get("staff")
+            user_id = reservation_data.get("user_id", "")
 
             if not staff:
                 logging.error(f"Staff name missing in reservation_data: {reservation_data}")
@@ -355,8 +367,7 @@ class GoogleCalendarHelper:
 
             if not self._is_within_effective_business_periods(date_str, start_time_str, end_time_str, staff):
                 logging.error(
-                    f"Reservation rejected by attendance/business-hours check: "
-                    f"staff={staff}, date={date_str}, start={start_time_str}, end={end_time_str}"
+                    f"Reservation rejected by attendance/business-hours check: staff={staff}, date={date_str}, start={start_time_str}, end={end_time_str}"
                 )
                 return False
 
@@ -376,16 +387,20 @@ class GoogleCalendarHelper:
 
             reservation_id = reservation_data.get("reservation_id", self.generate_reservation_id(date_str))
 
+            description_lines = [
+                f"予約ID: {reservation_id}",
+                f"サービス: {service_name}",
+                f"担当者: {staff}",
+                f"お客様: {client_name}",
+                f"所要時間: {duration_minutes}分",
+                "予約元: LINE Bot",
+            ]
+            if user_id:
+                description_lines.append(f"User ID: {user_id}")
+
             event = {
                 "summary": f"[予約] {service_name} - {client_name} ({staff})",
-                "description": f"""
-予約ID: {reservation_id}
-サービス: {service_name}
-担当者: {staff}
-お客様: {client_name}
-所要時間: {duration_minutes}分
-予約元: LINE Bot
-                """.strip(),
+                "description": "\n".join(description_lines),
                 "start": {
                     "dateTime": start_iso,
                     "timeZone": self.timezone,
@@ -396,11 +411,8 @@ class GoogleCalendarHelper:
                 },
             }
 
-            self.service.events().insert(
-                calendarId=staff_calendar_id,
-                body=event,
-            ).execute()
-
+            self.service.events().insert(calendarId=staff_calendar_id, body=event).execute()
+            self._clear_runtime_caches()
             return True
 
         except HttpError as e:
@@ -441,14 +453,11 @@ class GoogleCalendarHelper:
         cursor = business_start
 
         sorted_events: List[Tuple[datetime, datetime]] = []
-
         for event in events:
             event_start = self._parse_event_datetime(event.get("start", {}), default_is_end=False)
             event_end = self._parse_event_datetime(event.get("end", {}), default_is_end=True)
-
             if not event_start or not event_end:
                 continue
-
             sorted_events.append((event_start, event_end))
 
         sorted_events.sort(key=lambda x: x[0])
@@ -456,16 +465,13 @@ class GoogleCalendarHelper:
         for event_start, event_end in sorted_events:
             if event_end <= cursor:
                 continue
-
             if event_start >= business_end:
                 break
-
             if event_start > cursor:
                 available_periods.append({
                     "start": cursor.strftime("%H:%M"),
                     "end": min(event_start, business_end).strftime("%H:%M"),
                 })
-
             cursor = max(cursor, event_end)
             if cursor >= business_end:
                 break
@@ -508,9 +514,7 @@ class GoogleCalendarHelper:
                     if event_start.date() == current_date:
                         date_events.append(event)
 
-            date_events.sort(
-                key=lambda e: self._parse_event_datetime(e.get("start", {}), default_is_end=False) or datetime.min
-            )
+            date_events.sort(key=lambda e: self._parse_event_datetime(e.get("start", {}), default_is_end=False) or datetime.min)
 
             for business_period in effective_periods:
                 available_periods = self._find_available_periods(current_date, business_period, date_events)
@@ -546,9 +550,12 @@ class GoogleCalendarHelper:
     def get_events_for_date(self, date_str: str, staff_name: str = None) -> List[Dict]:
         self._reload_config_data()
         calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
-
         if not self.service or not calendar_id:
             return []
+
+        cache_key = f"{date_str}|{staff_name or '__BASE__'}"
+        if cache_key in self._events_cache:
+            return list(self._events_cache[cache_key])
 
         try:
             tz = pytz.timezone(self.timezone)
@@ -564,10 +571,24 @@ class GoogleCalendarHelper:
                 orderBy="startTime",
             ).execute()
 
-            return events_result.get("items", [])
+            events = events_result.get("items", [])
+            self._events_cache[cache_key] = list(events)
+            return list(events)
         except Exception as e:
             print(f"Failed to get events for date {date_str}: {e}")
             return []
+
+    def _filter_events_by_reservation_id(self, events: List[Dict[str, Any]], exclude_reservation_id: Optional[str]) -> List[Dict[str, Any]]:
+        if not exclude_reservation_id:
+            return list(events)
+
+        filtered = []
+        for event in events:
+            description = event.get("description", "")
+            if f"予約ID: {exclude_reservation_id}" in description:
+                continue
+            filtered.append(event)
+        return filtered
 
     def _generate_slots_for_no_preference(
         self,
@@ -577,17 +598,14 @@ class GoogleCalendarHelper:
         exclude_reservation_id: str = None,
     ) -> List[Dict[str, Any]]:
         slots_map: Dict[str, Dict[str, Any]] = {}
-
         current_date = start_date.date()
         end_date_only = end_date.date()
 
         while current_date <= end_date_only:
             date_str = current_date.strftime("%Y-%m-%d")
-
             for _staff_id, staff_data in self.staff_data.items():
                 if not isinstance(staff_data, dict):
                     continue
-
                 if not staff_data.get("is_active", True):
                     continue
 
@@ -596,9 +614,8 @@ class GoogleCalendarHelper:
                     continue
 
                 service_ids = staff_data.get("service_ids")
-                if isinstance(service_ids, list) and service_ids:
-                    if service_id and service_id not in service_ids:
-                        continue
+                if isinstance(service_ids, list) and service_ids and service_id and service_id not in service_ids:
+                    continue
 
                 try:
                     staff_slots = self.get_available_slots_for_modification(
@@ -636,28 +653,30 @@ class GoogleCalendarHelper:
     ) -> list:
         self._reload_config_data()
 
+        cache_key = "|".join([
+            start_date.strftime("%Y-%m-%d %H:%M:%S"),
+            end_date.strftime("%Y-%m-%d %H:%M:%S"),
+            staff_name or "__NO_STAFF__",
+            service_id or "__NO_SERVICE__",
+            exclude_reservation_id or "__NO_EXCLUDE__",
+        ])
+        if cache_key in self._slots_cache:
+            return list(self._slots_cache[cache_key])
+
         if staff_name and staff_name not in {"未指定", "指名なし", "おまかせ"}:
             calendar_id = self._get_staff_calendar_id(staff_name)
-
             if not self.service or not calendar_id:
                 print("Google Calendar not configured, using fallback slots")
-                return self._generate_fallback_slots(start_date, end_date, staff_name)
+                result = self._generate_fallback_slots(start_date, end_date, staff_name)
+                self._slots_cache[cache_key] = list(result)
+                return result
 
             try:
                 tz = pytz.timezone(self.timezone)
-
-                start_date_aware = start_date
-                end_date_aware = end_date + timedelta(days=1)
-
-                if start_date_aware.tzinfo is None:
-                    start_date_aware = tz.localize(start_date_aware)
-                else:
-                    start_date_aware = start_date_aware.astimezone(tz)
-
+                start_date_aware = start_date if start_date.tzinfo else tz.localize(start_date)
+                end_date_aware = (end_date + timedelta(days=1)) if end_date.tzinfo is None else end_date + timedelta(days=1)
                 if end_date_aware.tzinfo is None:
                     end_date_aware = tz.localize(end_date_aware)
-                else:
-                    end_date_aware = end_date_aware.astimezone(tz)
 
                 events_result = self.service.events().list(
                     calendarId=calendar_id,
@@ -666,29 +685,24 @@ class GoogleCalendarHelper:
                     singleEvents=True,
                     orderBy="startTime",
                 ).execute()
-
-                events = events_result.get("items", [])
-                if exclude_reservation_id:
-                    filtered = []
-                    for e in events:
-                        description = e.get("description", "")
-                        if f"予約ID: {exclude_reservation_id}" in description:
-                            continue
-                        filtered.append(e)
-                    events = filtered
-
-                return self._generate_all_slots(start_date, end_date, events, staff_name)
-
+                events = self._filter_events_by_reservation_id(events_result.get("items", []), exclude_reservation_id)
+                result = self._generate_all_slots(start_date, end_date, events, staff_name)
+                self._slots_cache[cache_key] = list(result)
+                return result
             except Exception as e:
                 print(f"Failed to get available slots from Google Calendar: {e}")
-                return self._generate_fallback_slots(start_date, end_date, staff_name)
+                result = self._generate_fallback_slots(start_date, end_date, staff_name)
+                self._slots_cache[cache_key] = list(result)
+                return result
 
-        return self._generate_slots_for_no_preference(
+        result = self._generate_slots_for_no_preference(
             start_date=start_date,
             end_date=end_date,
             service_id=service_id,
             exclude_reservation_id=exclude_reservation_id,
         )
+        self._slots_cache[cache_key] = list(result)
+        return result
 
     def get_available_slots_for_modification(
         self,
@@ -699,42 +713,39 @@ class GoogleCalendarHelper:
     ) -> List[Dict]:
         self._reload_config_data()
 
+        cache_key = f"MOD|{date_str}|{staff_name or '__NO_STAFF__'}|{service_id or '__NO_SERVICE__'}|{exclude_reservation_id or '__NO_EXCLUDE__'}"
+        if cache_key in self._slots_cache:
+            return list(self._slots_cache[cache_key])
+
         if not staff_name or staff_name in {"指名なし", "未指定", "おまかせ"}:
             target_date = datetime.strptime(date_str, "%Y-%m-%d")
-            return self._generate_slots_for_no_preference(
+            result = self._generate_slots_for_no_preference(
                 start_date=target_date,
                 end_date=target_date,
                 service_id=service_id,
                 exclude_reservation_id=exclude_reservation_id,
             )
+            self._slots_cache[cache_key] = list(result)
+            return result
 
         calendar_id = self._get_staff_calendar_id(staff_name) if staff_name else self.calendar_id
-
         if not self.service or not calendar_id:
-            return self._generate_fallback_slots(
+            result = self._generate_fallback_slots(
                 datetime.strptime(date_str, "%Y-%m-%d"),
                 datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1),
                 staff_name,
             )
+            self._slots_cache[cache_key] = list(result)
+            return result
 
         try:
             all_events = self.get_events_for_date(date_str, staff_name)
-
-            other_events = []
-            if exclude_reservation_id:
-                for e in all_events:
-                    description = e.get("description", "")
-                    if f"予約ID: {exclude_reservation_id}" in description:
-                        continue
-                    other_events.append(e)
-            else:
-                other_events = all_events
-
+            other_events = self._filter_events_by_reservation_id(all_events, exclude_reservation_id)
             start_date = datetime.strptime(date_str, "%Y-%m-%d")
             end_date = start_date
-
-            return self._generate_all_slots(start_date, end_date, other_events, staff_name)
-
+            result = self._generate_all_slots(start_date, end_date, other_events, staff_name)
+            self._slots_cache[cache_key] = list(result)
+            return result
         except Exception as e:
             print(f"Failed to get available slots for modification: {e}")
             return []
@@ -748,7 +759,6 @@ class GoogleCalendarHelper:
                 calendar_id = self._get_staff_calendar_id(staff_name)
                 if not calendar_id:
                     return None
-
                 events_result = self.service.events().list(
                     calendarId=calendar_id,
                     timeMin=datetime.now().isoformat() + "Z",
@@ -756,30 +766,15 @@ class GoogleCalendarHelper:
                     singleEvents=True,
                     orderBy="startTime",
                 ).execute()
-
                 for event in events_result.get("items", []):
                     if reservation_id in event.get("description", ""):
                         return event
                 return None
 
-            if self.calendar_id:
-                events_result = self.service.events().list(
-                    calendarId=self.calendar_id,
-                    timeMin=datetime.now().isoformat() + "Z",
-                    maxResults=100,
-                    singleEvents=True,
-                    orderBy="startTime",
-                ).execute()
-
-                for event in events_result.get("items", []):
-                    if reservation_id in event.get("description", ""):
-                        return event
-
             for _staff_id, staff_data in self.staff_data.items():
                 staff_calendar_id = self._get_staff_calendar_id(staff_data.get("name"))
                 if not staff_calendar_id:
                     continue
-
                 try:
                     events_result = self.service.events().list(
                         calendarId=staff_calendar_id,
@@ -788,15 +783,12 @@ class GoogleCalendarHelper:
                         singleEvents=True,
                         orderBy="startTime",
                     ).execute()
-
                     for event in events_result.get("items", []):
                         if reservation_id in event.get("description", ""):
                             return event
                 except Exception:
                     continue
-
             return None
-
         except Exception as e:
             print(f"Failed to get reservation by ID {reservation_id}: {e}")
             return None
@@ -822,13 +814,9 @@ class GoogleCalendarHelper:
             if not staff_calendar_id:
                 return False
 
-            self.service.events().delete(
-                calendarId=staff_calendar_id,
-                eventId=event["id"],
-            ).execute()
-
+            self.service.events().delete(calendarId=staff_calendar_id, eventId=event["id"]).execute()
+            self._clear_runtime_caches()
             return True
-
         except Exception as e:
             print(f"Failed to cancel reservation {reservation_id}: {e}")
             return False
@@ -840,24 +828,34 @@ class GoogleCalendarHelper:
         for _staff_id, staff_data in self.staff_data.items():
             if staff_data.get("name") == staff_name:
                 return staff_data.get("calendar_id") or self.calendar_id
-
         return self.calendar_id
 
     def get_short_calendar_url(self, staff_name: str = None) -> str:
         try:
             staff_calendar_id = self._get_staff_calendar_id(staff_name)
-
             if staff_calendar_id:
-                return (
-                    f"https://calendar.google.com/calendar/embed"
-                    f"?src={staff_calendar_id}&ctz=Asia%2FTokyo"
-                )
-
+                return f"https://calendar.google.com/calendar/embed?src={staff_calendar_id}&ctz=Asia%2FTokyo"
             return "https://calendar.google.com/calendar"
-
         except Exception as e:
             logging.error(f"Failed to generate calendar url: {e}", exc_info=True)
             return "https://calendar.google.com/calendar"
+
+    def _build_event_ranges_for_staff(
+        self,
+        date_str: str,
+        staff_name: str,
+        exclude_reservation_id: str = None,
+    ) -> List[Tuple[datetime, datetime]]:
+        staff_events = self._filter_events_by_reservation_id(self.get_events_for_date(date_str, staff_name), exclude_reservation_id)
+        tz = pytz.timezone(self.timezone)
+        ranges: List[Tuple[datetime, datetime]] = []
+        for event in staff_events:
+            event_start = self._parse_event_datetime(event.get("start", {}), default_is_end=False)
+            event_end = self._parse_event_datetime(event.get("end", {}), default_is_end=True)
+            if event_start and event_end:
+                ranges.append((event_start.astimezone(tz).replace(tzinfo=None), event_end.astimezone(tz).replace(tzinfo=None)))
+        ranges.sort(key=lambda x: x[0])
+        return ranges
 
     def check_staff_availability_for_time(
         self,
@@ -871,33 +869,33 @@ class GoogleCalendarHelper:
             if not self._is_within_effective_business_periods(date_str, start_time, end_time, staff_name):
                 return False
 
-            staff_events = self.get_events_for_date(date_str, staff_name)
-
             start_datetime = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
             end_datetime = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
 
-            for event in staff_events:
-                if exclude_reservation_id:
-                    description = event.get("description", "")
-                    if f"予約ID: {exclude_reservation_id}" in description:
-                        continue
-
-                event_start = self._parse_event_datetime(event.get("start", {}), default_is_end=False)
-                event_end = self._parse_event_datetime(event.get("end", {}), default_is_end=True)
-
-                if event_start and event_end:
-                    tz = pytz.timezone(self.timezone)
-                    event_start = event_start.astimezone(tz).replace(tzinfo=None)
-                    event_end = event_end.astimezone(tz).replace(tzinfo=None)
-
-                    if start_datetime < event_end and end_datetime > event_start:
-                        return False
-
+            for event_start, event_end in self._build_event_ranges_for_staff(date_str, staff_name, exclude_reservation_id):
+                if start_datetime < event_end and end_datetime > event_start:
+                    return False
             return True
-
         except Exception as e:
             print(f"Error checking staff availability: {e}")
             return False
+
+    def _get_all_events_for_date(self, date_str: str) -> List[Dict[str, Any]]:
+        if date_str in self._all_events_cache:
+            return list(self._all_events_cache[date_str])
+
+        all_events: List[Dict[str, Any]] = []
+        if self.calendar_id:
+            all_events.extend(self.get_events_for_date(date_str, None))
+
+        for _staff_id, staff_data in self.staff_data.items():
+            staff_name_check = staff_data.get("name") if isinstance(staff_data, dict) else None
+            if not staff_name_check:
+                continue
+            all_events.extend(self.get_events_for_date(date_str, staff_name_check))
+
+        self._all_events_cache[date_str] = list(all_events)
+        return list(all_events)
 
     def check_user_time_conflict(
         self,
@@ -909,39 +907,21 @@ class GoogleCalendarHelper:
         staff_name: str = None
     ) -> bool:
         try:
-            all_events = []
-
-            if self.calendar_id:
-                all_events.extend(self.get_events_for_date(date_str, None))
-
-            for _staff_id, staff_data in self.staff_data.items():
-                staff_name_check = staff_data.get("name")
-                if staff_name_check:
-                    all_events.extend(self.get_events_for_date(date_str, staff_name_check))
-
+            all_events = self._filter_events_by_reservation_id(self._get_all_events_for_date(date_str), exclude_reservation_id)
             start_datetime = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
             end_datetime = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
+            tz = pytz.timezone(self.timezone)
 
             for event in all_events:
-                if exclude_reservation_id:
-                    description = event.get("description", "")
-                    if f"予約ID: {exclude_reservation_id}" in description:
-                        continue
-
                 if self._is_user_reservation(event, user_id):
                     event_start = self._parse_event_datetime(event.get("start", {}), default_is_end=False)
                     event_end = self._parse_event_datetime(event.get("end", {}), default_is_end=True)
-
                     if event_start and event_end:
-                        tz = pytz.timezone(self.timezone)
                         event_start = event_start.astimezone(tz).replace(tzinfo=None)
                         event_end = event_end.astimezone(tz).replace(tzinfo=None)
-
                         if start_datetime < event_end and end_datetime > event_start:
                             return True
-
             return False
-
         except Exception as e:
             print(f"Error checking user time conflict: {e}")
             return True
@@ -956,12 +936,14 @@ class GoogleCalendarHelper:
     ) -> Optional[str]:
         self._reload_config_data()
 
-        candidates = []
+        cache_key = f"{date_str}|{start_time}|{end_time}|{service_id or '__NO_SERVICE__'}|{exclude_reservation_id or '__NO_EXCLUDE__'}"
+        if cache_key in self._assignable_staff_cache:
+            return self._assignable_staff_cache[cache_key]
 
+        candidates = []
         for _staff_id, staff_data in self.staff_data.items():
             if not isinstance(staff_data, dict):
                 continue
-
             if not staff_data.get("is_active", True):
                 continue
 
@@ -970,9 +952,8 @@ class GoogleCalendarHelper:
                 continue
 
             service_ids = staff_data.get("service_ids")
-            if isinstance(service_ids, list) and service_ids:
-                if service_id and service_id not in service_ids:
-                    continue
+            if isinstance(service_ids, list) and service_ids and service_id and service_id not in service_ids:
+                continue
 
             if not self.check_staff_availability_for_time(
                 date_str=date_str,
@@ -986,6 +967,7 @@ class GoogleCalendarHelper:
             candidates.append(staff_name)
 
         if not candidates:
+            self._assignable_staff_cache[cache_key] = None
             return None
 
         def _order_of(name: str) -> int:
@@ -995,7 +977,9 @@ class GoogleCalendarHelper:
             return 999
 
         candidates.sort(key=_order_of)
-        return candidates[0]
+        selected = candidates[0]
+        self._assignable_staff_cache[cache_key] = selected
+        return selected
 
     def _is_user_reservation(self, event: Dict, user_id: str) -> bool:
         try:
