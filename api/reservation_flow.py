@@ -12,6 +12,7 @@ from api.business_hours import (
     is_open_date,
     get_reservation_ui_limit_days,
 )
+from api.google_sheets_logger import get_sheets_logger
 
 
 class ReservationFlow:
@@ -19,6 +20,9 @@ class ReservationFlow:
         self.user_states = {}
         self.google_calendar = GoogleCalendarHelper()
         self.line_configuration = None
+        self.sheets_logger = get_sheets_logger()
+        self._profile_cache: Dict[str, Dict[str, Any]] = {}
+        self._profile_cache_ttl_seconds = 3600
 
         self.config_data = self._load_config_data()
         self.services = self.config_data.get("services", {})
@@ -2528,9 +2532,7 @@ class ReservationFlow:
                 return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
 
             try:
-                from api.google_sheets_logger import GoogleSheetsLogger
-
-                sheets_logger = GoogleSheetsLogger()
+                sheets_logger = self.sheets_logger
 
                 sheet_reservation_data = {
                     "reservation_id": reservation_id,
@@ -2558,9 +2560,7 @@ class ReservationFlow:
 
             if is_modification and original_reservation:
                 try:
-                    from api.google_sheets_logger import GoogleSheetsLogger
-
-                    sheets_logger = GoogleSheetsLogger()
+                    sheets_logger = self.sheets_logger
 
                     original_reservation_id = original_reservation["reservation_id"]
                     original_staff_name = original_reservation.get("staff")
@@ -2663,13 +2663,10 @@ class ReservationFlow:
 
     def _show_user_reservations_for_modification(self, user_id: str) -> Union[str, Dict[str, Any]]:
         try:
-            from api.google_sheets_logger import GoogleSheetsLogger
             import pytz
 
-            sheets_logger = GoogleSheetsLogger()
-            client_name = self._get_line_display_name(user_id)
-
-            reservations = sheets_logger.get_user_reservations(client_name)
+            sheets_logger = self.sheets_logger
+            reservations = sheets_logger.get_user_reservations_by_user_id(user_id)
 
             if not reservations:
                 if user_id in self.user_states:
@@ -2901,13 +2898,10 @@ class ReservationFlow:
 
     def _show_user_reservations_for_cancellation(self, user_id: str) -> Union[str, Dict[str, Any]]:
         try:
-            from api.google_sheets_logger import GoogleSheetsLogger
             import pytz
 
-            sheets_logger = GoogleSheetsLogger()
-            client_name = self._get_line_display_name(user_id)
-
-            reservations = sheets_logger.get_user_reservations(client_name)
+            sheets_logger = self.sheets_logger
+            reservations = sheets_logger.get_user_reservations_by_user_id(user_id)
 
             if not reservations:
                 if user_id in self.user_states:
@@ -3113,9 +3107,7 @@ class ReservationFlow:
             logging.error(f"Error checking cancellation time limit: {e}")
 
         try:
-            from api.google_sheets_logger import GoogleSheetsLogger
-
-            sheets_logger = GoogleSheetsLogger()
+            sheets_logger = self.sheets_logger
 
             reservation_id = reservation["reservation_id"]
             sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
@@ -3149,9 +3141,7 @@ class ReservationFlow:
 
     def _handle_reservation_id_cancellation(self, user_id: str, reservation_id: str) -> str:
         try:
-            from api.google_sheets_logger import GoogleSheetsLogger
-
-            sheets_logger = GoogleSheetsLogger()
+            sheets_logger = self.sheets_logger
             sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
 
             if not sheets_success:
