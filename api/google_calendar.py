@@ -2,7 +2,7 @@
 Google Calendar integration for salon reservations
 - Staff attendance aware version
 - No-preference staff assignment supported
-- Optimized with in-memory caches to reduce repeated Google Calendar API calls
+- Load-balanced free-staff assignment version
 """
 import os
 import json
@@ -41,6 +41,7 @@ class GoogleCalendarHelper:
         self._all_events_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._slots_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._assignable_staff_cache: Dict[str, Optional[str]] = {}
+        self._free_staff_assignment_cache: Dict[str, Optional[Dict[str, Any]]] = {}
 
         try:
             self._authenticate()
@@ -71,6 +72,7 @@ class GoogleCalendarHelper:
         self._all_events_cache.clear()
         self._slots_cache.clear()
         self._assignable_staff_cache.clear()
+        self._free_staff_assignment_cache.clear()
 
     def _reload_config_data(self, force: bool = False) -> None:
         current_mtime = self._get_config_mtime()
@@ -242,7 +244,7 @@ class GoogleCalendarHelper:
         if not store_periods:
             return []
 
-        if not staff_name or staff_name in {"未指定", "指名なし", "おまかせ"}:
+        if not staff_name or staff_name in {"未指定", "指名なし", "おまかせ", "free"}:
             return store_periods
 
         staff_record = self._get_staff_record_by_name(staff_name)
@@ -336,8 +338,10 @@ class GoogleCalendarHelper:
 
             date_str = reservation_data["date"]
             service_name = reservation_data["service"]
-            staff = reservation_data.get("staff")
+            staff = reservation_data.get("assigned_staff") or reservation_data.get("staff")
             user_id = reservation_data.get("user_id", "")
+            selected_staff = reservation_data.get("selected_staff")
+            assigned_staff = reservation_data.get("assigned_staff") or staff
 
             if not staff:
                 logging.error(f"Staff name missing in reservation_data: {reservation_data}")
@@ -390,16 +394,20 @@ class GoogleCalendarHelper:
             description_lines = [
                 f"予約ID: {reservation_id}",
                 f"サービス: {service_name}",
-                f"担当者: {staff}",
+                f"担当者: {assigned_staff}",
                 f"お客様: {client_name}",
                 f"所要時間: {duration_minutes}分",
                 "予約元: LINE Bot",
             ]
+            if selected_staff:
+                description_lines.append(f"Selected Staff: {selected_staff}")
+            if assigned_staff:
+                description_lines.append(f"Assigned Staff: {assigned_staff}")
             if user_id:
                 description_lines.append(f"User ID: {user_id}")
 
             event = {
-                "summary": f"[予約] {service_name} - {client_name} ({staff})",
+                "summary": f"[予約] {service_name} - {client_name} ({assigned_staff})",
                 "description": "\n".join(description_lines),
                 "start": {
                     "dateTime": start_iso,
@@ -441,7 +449,7 @@ class GoogleCalendarHelper:
         except Exception:
             return None
 
-    def _find_available_periods(self, target_date, business_period, events):
+    def _find_available_periods(self, target_date: date, business_period: Dict[str, str], events: List[Dict[str, Any]]):
         tz = pytz.timezone(self.timezone)
         start_str = business_period.get("start", "00:00")
         end_str = business_period.get("end", "23:59")
@@ -663,10 +671,9 @@ class GoogleCalendarHelper:
         if cache_key in self._slots_cache:
             return list(self._slots_cache[cache_key])
 
-        if staff_name and staff_name not in {"未指定", "指名なし", "おまかせ"}:
+        if staff_name and staff_name not in {"未指定", "指名なし", "おまかせ", "free"}:
             calendar_id = self._get_staff_calendar_id(staff_name)
             if not self.service or not calendar_id:
-                print("Google Calendar not configured, using fallback slots")
                 result = self._generate_fallback_slots(start_date, end_date, staff_name)
                 self._slots_cache[cache_key] = list(result)
                 return result
@@ -717,7 +724,7 @@ class GoogleCalendarHelper:
         if cache_key in self._slots_cache:
             return list(self._slots_cache[cache_key])
 
-        if not staff_name or staff_name in {"指名なし", "未指定", "おまかせ"}:
+        if not staff_name or staff_name in {"指名なし", "未指定", "おまかせ", "free"}:
             target_date = datetime.strptime(date_str, "%Y-%m-%d")
             result = self._generate_slots_for_no_preference(
                 start_date=target_date,
@@ -822,7 +829,7 @@ class GoogleCalendarHelper:
             return False
 
     def _get_staff_calendar_id(self, staff_name: str) -> Optional[str]:
-        if not staff_name or staff_name in {"未指定", "指名なし", "おまかせ"}:
+        if not staff_name or staff_name in {"未指定", "指名なし", "おまかせ", "free"}:
             return self.calendar_id
 
         for _staff_id, staff_data in self.staff_data.items():
@@ -926,21 +933,107 @@ class GoogleCalendarHelper:
             print(f"Error checking user time conflict: {e}")
             return True
 
-    def find_assignable_staff(
+    def _is_user_reservation(self, event: Dict, user_id: str) -> bool:
+        try:
+            description = event.get("description", "")
+            if "User ID:" in description:
+                event_user_id = description.split("User ID:")[1].split("\n")[0].strip()
+                return event_user_id == user_id
+            return False
+        except Exception:
+            return False
+
+    def _is_reservation_event(self, event: Dict[str, Any]) -> bool:
+        summary = str(event.get("summary", "")).strip()
+        return summary.startswith("[予約]")
+
+    def _extract_event_duration_minutes(self, event: Dict[str, Any]) -> int:
+        try:
+            event_start = self._parse_event_datetime(event.get("start", {}), default_is_end=False)
+            event_end = self._parse_event_datetime(event.get("end", {}), default_is_end=True)
+            if event_start and event_end:
+                return max(0, int((event_end - event_start).total_seconds() // 60))
+
+            description = str(event.get("description", ""))
+            marker = "所要時間:"
+            if marker in description:
+                raw = description.split(marker, 1)[1].split("\n", 1)[0].strip()
+                if raw.endswith("分"):
+                    raw = raw[:-1]
+                if raw.isdigit():
+                    return int(raw)
+        except Exception:
+            pass
+        return 0
+
+    def _get_staff_day_workload(
+        self,
+        date_str: str,
+        staff_name: str,
+        exclude_reservation_id: Optional[str] = None,
+    ) -> Dict[str, int]:
+        total_duration = 0
+        reservation_count = 0
+
+        try:
+            events = self._filter_events_by_reservation_id(
+                self.get_events_for_date(date_str, staff_name),
+                exclude_reservation_id,
+            )
+            for event in events:
+                if not self._is_reservation_event(event):
+                    continue
+                total_duration += self._extract_event_duration_minutes(event)
+                reservation_count += 1
+        except Exception as e:
+            logging.warning(f"Failed to calculate workload for {staff_name} on {date_str}: {e}")
+
+        return {
+            "total_duration_minutes": total_duration,
+            "reservation_count": reservation_count,
+        }
+
+    def _staff_order(self, staff_name: str) -> int:
+        for _, s in self.staff_data.items():
+            if isinstance(s, dict) and s.get("name") == staff_name:
+                return int(s.get("order", 999))
+        return 999
+
+    def assign_staff_for_free_reservation(
         self,
         date_str: str,
         start_time: str,
-        end_time: str,
+        duration_minutes: int,
         service_id: str = None,
         exclude_reservation_id: str = None,
-    ) -> Optional[str]:
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Free-staff assignment rule:
+        1. candidate staff filtered by service support / attendance / business hours / calendar vacancy
+        2. smaller total scheduled minutes on the day first
+        3. fewer reservation count on the day second
+        4. lower display order third
+        """
         self._reload_config_data()
 
-        cache_key = f"{date_str}|{start_time}|{end_time}|{service_id or '__NO_SERVICE__'}|{exclude_reservation_id or '__NO_EXCLUDE__'}"
-        if cache_key in self._assignable_staff_cache:
-            return self._assignable_staff_cache[cache_key]
+        cache_key = "|".join([
+            date_str,
+            start_time,
+            str(duration_minutes),
+            service_id or "__NO_SERVICE__",
+            exclude_reservation_id or "__NO_EXCLUDE__",
+        ])
+        if cache_key in self._free_staff_assignment_cache:
+            cached = self._free_staff_assignment_cache[cache_key]
+            return dict(cached) if cached else None
 
-        candidates = []
+        end_time = self._calculate_end_time(start_time, duration_minutes)
+        if not end_time:
+            self._free_staff_assignment_cache[cache_key] = None
+            return None
+
+        candidates: List[Dict[str, Any]] = []
+
         for _staff_id, staff_data in self.staff_data.items():
             if not isinstance(staff_data, dict):
                 continue
@@ -964,29 +1057,68 @@ class GoogleCalendarHelper:
             ):
                 continue
 
-            candidates.append(staff_name)
+            workload = self._get_staff_day_workload(
+                date_str=date_str,
+                staff_name=staff_name,
+                exclude_reservation_id=exclude_reservation_id,
+            )
+
+            candidates.append({
+                "staff_name": staff_name,
+                "total_duration_minutes": workload["total_duration_minutes"],
+                "reservation_count": workload["reservation_count"],
+                "order": self._staff_order(staff_name),
+            })
 
         if not candidates:
-            self._assignable_staff_cache[cache_key] = None
+            self._free_staff_assignment_cache[cache_key] = None
             return None
 
-        def _order_of(name: str) -> int:
-            for _, s in self.staff_data.items():
-                if isinstance(s, dict) and s.get("name") == name:
-                    return int(s.get("order", 999))
-            return 999
-
-        candidates.sort(key=_order_of)
+        candidates.sort(
+            key=lambda item: (
+                item["total_duration_minutes"],
+                item["reservation_count"],
+                item["order"],
+            )
+        )
         selected = candidates[0]
-        self._assignable_staff_cache[cache_key] = selected
-        return selected
+        self._free_staff_assignment_cache[cache_key] = dict(selected)
+        return dict(selected)
 
-    def _is_user_reservation(self, event: Dict, user_id: str) -> bool:
+    def _calculate_end_time(self, start_time: str, duration_minutes: int) -> Optional[str]:
         try:
-            description = event.get("description", "")
-            if "User ID:" in description:
-                event_user_id = description.split("User ID:")[1].split("\n")[0].strip()
-                return event_user_id == user_id
-            return False
+            start_hour, start_minute = map(int, start_time.split(":"))
+            start_total = start_hour * 60 + start_minute
+            end_total = start_total + int(duration_minutes)
+            end_hour, end_minute = divmod(end_total, 60)
+            return f"{end_hour:02d}:{end_minute:02d}"
         except Exception:
-            return False
+            return None
+
+    def find_assignable_staff(
+        self,
+        date_str: str,
+        start_time: str,
+        end_time: str,
+        service_id: str = None,
+        exclude_reservation_id: str = None,
+    ) -> Optional[str]:
+        duration_minutes = 0
+        try:
+            start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
+            end_dt = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
+            duration_minutes = int((end_dt - start_dt).total_seconds() // 60)
+        except Exception:
+            pass
+
+        if duration_minutes <= 0 and service_id:
+            duration_minutes = self._get_service_duration_minutes(service_id)
+
+        assigned = self.assign_staff_for_free_reservation(
+            date_str=date_str,
+            start_time=start_time,
+            duration_minutes=duration_minutes or 60,
+            service_id=service_id,
+            exclude_reservation_id=exclude_reservation_id,
+        )
+        return assigned["staff_name"] if assigned else None
