@@ -17,10 +17,9 @@ class GoogleSheetsLogger:
     1. Reservations sheet (reservation ledger)
     2. Users sheet (initial registration + consent management)
 
-    最小修正版:
-    - gspread client / worksheet を使い回す
-    - get_all_records の結果を短時間キャッシュ
-    - 更新後に該当キャッシュだけ無効化
+    Free-staff assignment対応版:
+    - selected_staff / assigned_staff を分離保持
+    - 既存の Staff 列には実担当（assigned_staff）を保持
     """
 
     RESERVATION_HEADERS = [
@@ -32,10 +31,12 @@ class GoogleSheetsLogger:
         "Start Time",
         "End Time",
         "Service",
+        "Selected Staff",
+        "Assigned Staff",
         "Staff",
         "Duration (min)",
         "Price",
-        "Status"
+        "Status",
     ]
 
     USER_HEADERS = [
@@ -141,7 +142,7 @@ class GoogleSheetsLogger:
             self.reservations_worksheet = self._get_or_create_worksheet(
                 title="Reservations",
                 rows=1000,
-                cols=12,
+                cols=len(self.RESERVATION_HEADERS),
                 headers=self.RESERVATION_HEADERS
             )
             self.users_worksheet = self._get_or_create_worksheet(
@@ -191,7 +192,9 @@ class GoogleSheetsLogger:
                 return True
             if actual_headers == expected_headers:
                 return True
-            logging.warning(f"Header mismatch detected in worksheet '{worksheet.title}'. Resetting headers.")
+            logging.warning(
+                f"Header mismatch detected in worksheet '{worksheet.title}'. Resetting headers."
+            )
             worksheet.clear()
             worksheet.append_row(expected_headers)
             self._invalidate_all_cache()
@@ -206,7 +209,7 @@ class GoogleSheetsLogger:
         self.reservations_worksheet = self._get_or_create_worksheet(
             title="Reservations",
             rows=1000,
-            cols=12,
+            cols=len(self.RESERVATION_HEADERS),
             headers=self.RESERVATION_HEADERS
         )
         return self.reservations_worksheet
@@ -277,17 +280,15 @@ class GoogleSheetsLogger:
             logging.error(f"Failed to get reservations from Google Sheets: {e}")
             return []
 
-    # -----------------------------
-    # Reservations
-    # -----------------------------
     def save_reservation(self, reservation_data: Dict[str, Any]) -> bool:
         reservations_worksheet = self._get_reservations_worksheet()
         if not reservations_worksheet:
             return False
         try:
-            timestamp = self._get_tokyo_timestamp()
+            selected_staff = reservation_data.get("selected_staff", "")
+            assigned_staff = reservation_data.get("assigned_staff") or reservation_data.get("staff", "")
             row_data = [
-                timestamp,
+                self._get_tokyo_timestamp(),
                 reservation_data.get("reservation_id", ""),
                 reservation_data.get("user_id", ""),
                 reservation_data.get("client_name", ""),
@@ -295,10 +296,12 @@ class GoogleSheetsLogger:
                 reservation_data.get("start_time", ""),
                 reservation_data.get("end_time", ""),
                 reservation_data.get("service", ""),
-                reservation_data.get("staff", ""),
+                selected_staff,
+                assigned_staff,
+                assigned_staff,
                 reservation_data.get("duration", ""),
                 reservation_data.get("price", ""),
-                "Confirmed"
+                "Confirmed",
             ]
             reservations_worksheet.append_row(row_data)
             self._invalidate_cache("reservation_records")
@@ -308,24 +311,31 @@ class GoogleSheetsLogger:
             logging.error(f"Failed to save reservation to Google Sheets: {e}")
             return False
 
+    def _record_to_reservation(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        selected_staff = record.get("Selected Staff", "")
+        assigned_staff = record.get("Assigned Staff", "") or record.get("Staff", "")
+        return {
+            "reservation_id": record.get("Reservation ID"),
+            "user_id": record.get("User ID"),
+            "client_name": record.get("Client Name"),
+            "date": record.get("Date"),
+            "start_time": record.get("Start Time"),
+            "end_time": record.get("End Time"),
+            "service": record.get("Service"),
+            "selected_staff": selected_staff,
+            "assigned_staff": assigned_staff,
+            "staff": assigned_staff,
+            "duration": record.get("Duration (min)"),
+            "price": record.get("Price"),
+            "status": record.get("Status"),
+        }
+
     def get_all_reservations(self) -> list:
         records = self._get_reservation_records()
         reservations = []
         for record in records:
             if record.get("Reservation ID"):
-                reservations.append({
-                    "reservation_id": record.get("Reservation ID"),
-                    "user_id": record.get("User ID"),
-                    "client_name": record.get("Client Name"),
-                    "date": record.get("Date"),
-                    "start_time": record.get("Start Time"),
-                    "end_time": record.get("End Time"),
-                    "service": record.get("Service"),
-                    "staff": record.get("Staff"),
-                    "duration": record.get("Duration (min)"),
-                    "price": record.get("Price"),
-                    "status": record.get("Status")
-                })
+                reservations.append(self._record_to_reservation(record))
         return reservations
 
     def get_confirmed_reservations(self) -> list:
@@ -352,9 +362,10 @@ class GoogleSheetsLogger:
             return False
         try:
             records = self._get_reservation_records()
+            status_col = self.RESERVATION_HEADERS.index("Status") + 1
             for i, record in enumerate(records, start=2):
                 if record.get("Reservation ID") == reservation_id:
-                    reservations_worksheet.update_cell(i, 12, status)
+                    reservations_worksheet.update_cell(i, status_col, status)
                     self._invalidate_cache("reservation_records")
                     print(f"Updated reservation {reservation_id} status to {status}")
                     return True
@@ -368,19 +379,7 @@ class GoogleSheetsLogger:
         try:
             for record in self._get_reservation_records():
                 if record.get("Reservation ID") == reservation_id:
-                    return {
-                        "reservation_id": record.get("Reservation ID"),
-                        "user_id": record.get("User ID"),
-                        "client_name": record.get("Client Name"),
-                        "date": record.get("Date"),
-                        "start_time": record.get("Start Time"),
-                        "end_time": record.get("End Time"),
-                        "service": record.get("Service"),
-                        "staff": record.get("Staff"),
-                        "duration": record.get("Duration (min)"),
-                        "price": record.get("Price"),
-                        "status": record.get("Status")
-                    }
+                    return self._record_to_reservation(record)
             return None
         except Exception as e:
             logging.error(f"Failed to get reservation by ID: {e}")
@@ -412,19 +411,7 @@ class GoogleSheetsLogger:
             date_reservations = []
             for record in self._get_reservation_records():
                 if record.get("Date") == date_str:
-                    date_reservations.append({
-                        "reservation_id": record.get("Reservation ID", ""),
-                        "user_id": record.get("User ID", ""),
-                        "client_name": record.get("Client Name", ""),
-                        "date": record.get("Date", ""),
-                        "start_time": record.get("Start Time", ""),
-                        "end_time": record.get("End Time", ""),
-                        "service": record.get("Service", ""),
-                        "staff": record.get("Staff", ""),
-                        "duration": record.get("Duration (min)", ""),
-                        "price": record.get("Price", ""),
-                        "status": record.get("Status", "")
-                    })
+                    date_reservations.append(self._record_to_reservation(record))
             return date_reservations
         except Exception as e:
             logging.error(f"Error getting reservations for date {date_str}: {e}")
@@ -442,9 +429,6 @@ class GoogleSheetsLogger:
             logging.error(f"Error getting user ID for reservation {reservation_id}: {e}")
             return None
 
-    # -----------------------------
-    # Users
-    # -----------------------------
     def log_new_user(self, user_id: str, display_name: str, phone_number: str = "") -> bool:
         users_worksheet = self._get_users_worksheet()
         if not users_worksheet:
@@ -508,20 +492,17 @@ class GoogleSheetsLogger:
             logging.error(f"Error updating user status: {e}")
             return False
 
-    # -----------------------------
-    # Users sheet consent helpers
-    # -----------------------------
     def has_user_consented(self, user_id: str) -> bool:
         try:
             for record in self._get_users_records():
                 if record.get("User ID") == user_id:
-                    return str(record.get("Consented", "No")).strip().lower() in ("yes", "true", "1", "y")
+                    return str(record.get("Consented", "")).strip().lower() == "yes"
             return False
         except Exception as e:
-            logging.error(f"Error checking consent for {user_id}: {e}")
+            logging.error(f"Error checking consent for user {user_id}: {e}")
             return False
 
-    def mark_user_consented(self, user_id: str) -> bool:
+    def set_user_consent(self, user_id: str, consented: bool) -> bool:
         users_worksheet = self._get_users_worksheet()
         if not users_worksheet:
             return False
@@ -529,53 +510,22 @@ class GoogleSheetsLogger:
             records = self._get_users_records()
             for i, record in enumerate(records, start=2):
                 if record.get("User ID") == user_id:
-                    timestamp = self._get_tokyo_timestamp()
-                    users_worksheet.update_cell(i, 7, "Yes")
-                    users_worksheet.update_cell(i, 8, timestamp)
+                    users_worksheet.update_cell(i, 7, "Yes" if consented else "No")
+                    users_worksheet.update_cell(i, 8, self._get_tokyo_timestamp() if consented else "")
                     self._invalidate_cache("users_records")
-                    print(f"Marked consented in Users sheet: {user_id}")
-                    return True
-            self.log_new_user(user_id, display_name="", phone_number="")
-            return self.mark_user_consented(user_id)
-        except Exception as e:
-            logging.error(f"Error marking consent for {user_id}: {e}")
-            return False
-
-    def revoke_user_consent(self, user_id: str) -> bool:
-        users_worksheet = self._get_users_worksheet()
-        if not users_worksheet:
-            return False
-        try:
-            records = self._get_users_records()
-            for i, record in enumerate(records, start=2):
-                if record.get("User ID") == user_id:
-                    users_worksheet.update_cell(i, 7, "No")
-                    users_worksheet.update_cell(i, 8, "")
-                    self._invalidate_cache("users_records")
-                    print(f"Revoked consent in Users sheet: {user_id}")
                     return True
             return False
         except Exception as e:
-            logging.error(f"Error revoking consent for {user_id}: {e}")
+            logging.error(f"Error setting consent for user {user_id}: {e}")
             return False
 
-    def is_new_user(self, user_id: str) -> bool:
-        try:
-            for record in self._get_users_records():
-                if record.get("User ID") == user_id:
-                    return False
-            return True
-        except Exception as e:
-            logging.error(f"Error checking if user is new ({user_id}): {e}")
-            return True
 
-    def mark_user_seen(self, user_id: str) -> bool:
-        return True
-
-
-sheets_logger = GoogleSheetsLogger()
+_sheets_logger_instance = None
 
 
 def get_sheets_logger() -> GoogleSheetsLogger:
-    return sheets_logger
+    global _sheets_logger_instance
+    if _sheets_logger_instance is None:
+        _sheets_logger_instance = GoogleSheetsLogger()
+    return _sheets_logger_instance
 
