@@ -32,6 +32,248 @@ class ReservationFlow:
         self.settings_data = self._extract_settings_from_config(self.config_data)
 
         self.back_label = "← 戻る"
+        self._config_mtime = self._get_config_mtime()
+
+
+    def _ensure_runtime_cache(self, user_id: Optional[str]) -> Dict[str, Any]:
+        if not user_id:
+            return {}
+        state = self.user_states.setdefault(user_id, {"step": "start", "data": {"user_id": user_id}})
+        return state.setdefault("_runtime_cache", {
+            "available_slots": {},
+            "staff_slots_map": {},
+            "user_day_events": {},
+        })
+
+    def _clear_runtime_cache(self, user_id: Optional[str]):
+        if not user_id:
+            return
+        state = self.user_states.get(user_id)
+        if not state:
+            return
+        state.pop("_runtime_cache", None)
+
+    def _make_available_slots_cache_key(
+        self,
+        selected_date: str,
+        staff_name: Optional[str],
+        current_service_id: Optional[str],
+        exclude_reservation_id: Optional[str],
+    ) -> str:
+        staff_key = staff_name if staff_name else "__NO_STAFF__"
+        service_key = current_service_id if current_service_id else "__NO_SERVICE__"
+        exclude_key = exclude_reservation_id if exclude_reservation_id else "__NO_EXCLUDE__"
+        return f"{selected_date}|{staff_key}|{service_key}|{exclude_key}"
+
+    def _get_exclude_reservation_id_for_date(
+        self,
+        user_id: Optional[str],
+        selected_date: str,
+    ) -> Optional[str]:
+        if not user_id or user_id not in self.user_states:
+            return None
+
+        original_reservation = None
+        if self.user_states[user_id].get("is_modification", False):
+            original_reservation = self.user_states[user_id].get("original_reservation")
+
+        if original_reservation and original_reservation.get("date") == selected_date:
+            return original_reservation.get("reservation_id")
+
+        return None
+
+    def _time_range_fits_any_slot(
+        self,
+        slots: List[Dict[str, Any]],
+        start_time: str,
+        end_time: str,
+    ) -> bool:
+        for slot in slots:
+            slot_start = slot.get("time")
+            slot_end = slot.get("end_time")
+            if not slot_start or not slot_end:
+                continue
+            if slot_start <= start_time and end_time <= slot_end:
+                return True
+        return False
+
+    def _get_staff_available_slots_map_for_date(
+        self,
+        user_id: Optional[str],
+        selected_date: str,
+        service_id: Optional[str],
+        exclude_reservation_id: Optional[str],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        runtime_cache = self._ensure_runtime_cache(user_id)
+        cache_key = self._make_available_slots_cache_key(
+            selected_date=selected_date,
+            staff_name="__STAFF_MAP__",
+            current_service_id=service_id,
+            exclude_reservation_id=exclude_reservation_id,
+        )
+
+        if runtime_cache and cache_key in runtime_cache["staff_slots_map"]:
+            return runtime_cache["staff_slots_map"][cache_key]
+
+        staff_slots_map: Dict[str, List[Dict[str, Any]]] = {}
+        selectable_staff = self._get_selectable_staff_records(service_id)
+
+        for _staff_key, staff_data in selectable_staff:
+            staff_name = staff_data.get("name")
+            if not staff_name:
+                continue
+
+            try:
+                slots = self.google_calendar.get_available_slots_for_modification(
+                    selected_date,
+                    exclude_reservation_id,
+                    staff_name,
+                    service_id,
+                )
+            except Exception as e:
+                logging.warning(f"Failed to get slots for staff={staff_name}, date={selected_date}: {e}")
+                slots = []
+
+            staff_slots_map[staff_name] = [
+                slot for slot in slots
+                if slot.get("date") == selected_date and slot.get("available")
+            ]
+
+        if runtime_cache is not None:
+            runtime_cache["staff_slots_map"][cache_key] = staff_slots_map
+
+        return staff_slots_map
+
+    def _get_user_day_event_ranges(
+        self,
+        user_id: Optional[str],
+        selected_date: str,
+        exclude_reservation_id: Optional[str] = None,
+    ) -> List[Tuple[datetime, datetime]]:
+        if not user_id:
+            return []
+
+        runtime_cache = self._ensure_runtime_cache(user_id)
+        cache_key = f"{selected_date}|{exclude_reservation_id or '__NO_EXCLUDE__'}"
+        if runtime_cache and cache_key in runtime_cache["user_day_events"]:
+            return runtime_cache["user_day_events"][cache_key]
+
+        event_ranges: List[Tuple[datetime, datetime]] = []
+        all_events: List[Dict[str, Any]] = []
+
+        try:
+            if self.google_calendar.calendar_id:
+                all_events.extend(self.google_calendar.get_events_for_date(selected_date, None))
+        except Exception as e:
+            logging.warning(f"Failed to get base calendar events for {selected_date}: {e}")
+
+        for _staff_id, staff_data in self.staff_members.items():
+            if not isinstance(staff_data, dict):
+                continue
+            staff_name = staff_data.get("name")
+            if not staff_name:
+                continue
+            try:
+                all_events.extend(self.google_calendar.get_events_for_date(selected_date, staff_name))
+            except Exception as e:
+                logging.warning(f"Failed to get staff events for {staff_name} on {selected_date}: {e}")
+
+        for event in all_events:
+            if exclude_reservation_id:
+                description = event.get("description", "")
+                if f"予約ID: {exclude_reservation_id}" in description:
+                    continue
+
+            if not self.google_calendar._is_user_reservation(event, user_id):
+                continue
+
+            event_start = self.google_calendar._parse_event_datetime(event.get("start", {}), default_is_end=False)
+            event_end = self.google_calendar._parse_event_datetime(event.get("end", {}), default_is_end=True)
+
+            if event_start and event_end:
+                tz = self.google_calendar.timezone
+                try:
+                    import pytz
+                    local_tz = pytz.timezone(tz)
+                    event_start = event_start.astimezone(local_tz).replace(tzinfo=None)
+                    event_end = event_end.astimezone(local_tz).replace(tzinfo=None)
+                except Exception:
+                    event_start = event_start.replace(tzinfo=None)
+                    event_end = event_end.replace(tzinfo=None)
+
+                event_ranges.append((event_start, event_end))
+
+        if runtime_cache is not None:
+            runtime_cache["user_day_events"][cache_key] = event_ranges
+
+        return event_ranges
+
+    def _has_local_user_conflict(
+        self,
+        user_id: Optional[str],
+        selected_date: str,
+        start_time: str,
+        end_time: str,
+        exclude_reservation_id: Optional[str] = None,
+    ) -> bool:
+        if not user_id:
+            return False
+
+        try:
+            start_dt = datetime.strptime(f"{selected_date} {start_time}", "%Y-%m-%d %H:%M")
+            end_dt = datetime.strptime(f"{selected_date} {end_time}", "%Y-%m-%d %H:%M")
+        except Exception:
+            return False
+
+        for event_start, event_end in self._get_user_day_event_ranges(
+            user_id=user_id,
+            selected_date=selected_date,
+            exclude_reservation_id=exclude_reservation_id,
+        ):
+            if start_dt < event_end and end_dt > event_start:
+                return True
+
+        return False
+
+    def _resolve_assignable_staff_locally(
+        self,
+        user_id: Optional[str],
+        selected_date: str,
+        start_time: str,
+        end_time: str,
+        service_id: Optional[str],
+        exclude_reservation_id: Optional[str] = None,
+    ) -> Optional[str]:
+        staff_slots_map = self._get_staff_available_slots_map_for_date(
+            user_id=user_id,
+            selected_date=selected_date,
+            service_id=service_id,
+            exclude_reservation_id=exclude_reservation_id,
+        )
+
+        candidates: List[str] = []
+        for staff_name, slots in staff_slots_map.items():
+            if self._time_range_fits_any_slot(slots, start_time, end_time):
+                candidates.append(staff_name)
+
+        if not candidates:
+            return None
+
+        def _order_of(name: str) -> int:
+            for _, s in self.staff_members.items():
+                if isinstance(s, dict) and s.get("name") == name:
+                    return int(s.get("order", 999))
+            return 999
+
+        candidates.sort(key=_order_of)
+        return candidates[0]
+
+
+    def _get_config_mtime(self) -> Optional[float]:
+        try:
+            return os.path.getmtime(self._config_path())
+        except Exception:
+            return None
 
     def _config_path(self) -> str:
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -60,7 +302,11 @@ class ReservationFlow:
             "recommendation_rules": config.get("booking", {}).get("recommendation_rules", {}),
         }
 
-    def _reload_settings(self) -> Dict[str, Any]:
+    def _reload_settings(self, force: bool = False) -> Dict[str, Any]:
+        current_mtime = self._get_config_mtime()
+        if not force and current_mtime is not None and self._config_mtime == current_mtime:
+            return self.settings_data
+
         self.config_data = self._load_config_data()
         self.services = self.config_data.get("services", {})
         self.staff_members = self.config_data.get("staff", {})
@@ -71,6 +317,7 @@ class ReservationFlow:
         self.confirmation_keywords = self.config_data.get("confirmation_keywords", {})
 
         self.settings_data = self._extract_settings_from_config(self.config_data)
+        self._config_mtime = current_mtime
         return self.settings_data
 
     def _normalize_input_text(self, text: str) -> str:
@@ -573,6 +820,8 @@ class ReservationFlow:
         ]:
             state.pop(key, None)
 
+        self._clear_runtime_cache(user_id)
+
     def _clear_reservation_selection_after_staff(self, user_id: str):
         state = self.user_states.get(user_id, {})
         data = state.get("data", {})
@@ -589,11 +838,15 @@ class ReservationFlow:
         ]:
             state.pop(key, None)
 
+        self._clear_runtime_cache(user_id)
+
     def _clear_time_selection(self, user_id: str):
         state = self.user_states.get(user_id, {})
         data = state.get("data", {})
         for key in ["start_time", "end_time", "time"]:
             data.pop(key, None)
+
+        self._clear_runtime_cache(user_id)
 
     def _build_time_options_30min(
         self,
@@ -650,35 +903,25 @@ class ReservationFlow:
         service_duration: int,
     ) -> List[str]:
         valid_times = []
-
-        original_reservation = None
-        exclude_reservation_id = None
-        if user_id and user_id in self.user_states:
-            state = self.user_states[user_id]
-            if state.get("is_modification", False):
-                original_reservation = state.get("original_reservation")
-                if original_reservation and original_reservation.get("date") == selected_date:
-                    exclude_reservation_id = original_reservation.get("reservation_id")
-
+        exclude_reservation_id = self._get_exclude_reservation_id_for_date(user_id, selected_date)
         service_id = self._get_current_service_id(user_id) if user_id else None
+
+        staff_slots_map: Dict[str, List[Dict[str, Any]]] = {}
+        if self._is_no_preference_staff(staff_name):
+            staff_slots_map = self._get_staff_available_slots_map_for_date(
+                user_id=user_id,
+                selected_date=selected_date,
+                service_id=service_id,
+                exclude_reservation_id=exclude_reservation_id,
+            )
 
         for start_time in time_options:
             end_time = self._calculate_optimal_end_time(start_time, service_duration)
 
-            if staff_name and not self._is_no_preference_staff(staff_name):
-                staff_ok = self.google_calendar.check_staff_availability_for_time(
-                    date_str=selected_date,
-                    start_time=start_time,
-                    end_time=end_time,
-                    staff_name=staff_name,
-                    exclude_reservation_id=exclude_reservation_id,
-                )
-                if not staff_ok:
-                    continue
-                resolved_staff_for_conflict_check = staff_name
-            else:
-                assignable_staff = self.google_calendar.find_assignable_staff(
-                    date_str=selected_date,
+            if self._is_no_preference_staff(staff_name):
+                assignable_staff = self._resolve_assignable_staff_locally(
+                    user_id=user_id,
+                    selected_date=selected_date,
                     start_time=start_time,
                     end_time=end_time,
                     service_id=service_id,
@@ -686,17 +929,18 @@ class ReservationFlow:
                 )
                 if not assignable_staff:
                     continue
-                resolved_staff_for_conflict_check = assignable_staff
+            else:
+                # 指名ありは、available_slots から既に絞られた枠をもとに time_options を作っているため
+                # ここでは重い再問い合わせをせず、最終確定時に厳密チェックする。
+                assignable_staff = staff_name
 
-            user_conflict = self.google_calendar.check_user_time_conflict(
-                selected_date,
-                start_time,
-                end_time,
-                user_id,
-                exclude_reservation_id,
-                resolved_staff_for_conflict_check,
-            )
-            if user_conflict:
+            if self._has_local_user_conflict(
+                user_id=user_id,
+                selected_date=selected_date,
+                start_time=start_time,
+                end_time=end_time,
+                exclude_reservation_id=exclude_reservation_id,
+            ):
                 continue
 
             valid_times.append(start_time)
@@ -1014,6 +1258,17 @@ class ReservationFlow:
             exclude_reservation_id = original_reservation.get("reservation_id")
 
         current_service_id = self._get_current_service_id(user_id) if user_id else None
+        runtime_cache = self._ensure_runtime_cache(user_id)
+        cache_key = self._make_available_slots_cache_key(
+            selected_date=selected_date,
+            staff_name=staff_name,
+            current_service_id=current_service_id,
+            exclude_reservation_id=exclude_reservation_id,
+        )
+
+        if runtime_cache and cache_key in runtime_cache["available_slots"]:
+            cached_slots = runtime_cache["available_slots"][cache_key]
+            return [dict(slot) for slot in cached_slots]
 
         if staff_name and not self._is_no_preference_staff(staff_name):
             staff_slots = self.google_calendar.get_available_slots_for_modification(
@@ -1042,6 +1297,9 @@ class ReservationFlow:
                         }
                         staff_slots.append(original_slot)
                         staff_slots.sort(key=lambda x: x.get("time", ""))
+
+            if runtime_cache is not None:
+                runtime_cache["available_slots"][cache_key] = [dict(slot) for slot in staff_slots]
 
             return staff_slots
 
@@ -1078,6 +1336,9 @@ class ReservationFlow:
                     }
                     date_slots.append(original_slot)
                     date_slots.sort(key=lambda x: x.get("time", ""))
+
+        if runtime_cache is not None:
+            runtime_cache["available_slots"][cache_key] = [dict(slot) for slot in date_slots]
 
         return date_slots
 
