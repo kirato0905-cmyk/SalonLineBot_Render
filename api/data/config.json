@@ -242,27 +242,27 @@
         }
       },
       "attendance_exceptions": {
-        "2026-04-10": {
+        "2026-05-01": {
           "start": "13:00",
           "end": "18:00",
           "is_working": true
         },
-        "2026-04-12": {
+        "2026-05-05": {
           "is_working": false
         },
-        "2026-04-15": {
+        "2026-05-14": {
           "start": "09:00",
           "end": "17:00",
           "is_working": true
         }
       },
       "attendance_shifts": {
-        "2026-04-20": {
+        "2026-05-20": {
           "start": "10:00",
           "end": "18:00",
           "is_working": true
         },
-        "2026-04-21": {
+        "2026-05-21": {
           "is_working": false
         }
       }
@@ -316,15 +316,15 @@
         }
       },
       "attendance_exceptions": {
-        "2026-04-10": {
+        "2026-05-02": {
           "is_working": false
         },
-        "2026-04-16": {
+        "2026-05-08": {
           "start": "12:00",
           "end": "20:00",
           "is_working": true
         },
-        "2026-04-18": {
+        "2026-05-16": {
           "start": "11:00",
           "end": "17:00",
           "is_working": true
@@ -376,15 +376,15 @@
         }
       },
       "attendance_exceptions": {
-        "2026-04-09": {
+        "2026-05-07": {
           "start": "14:00",
           "end": "20:00",
           "is_working": true
         },
-        "2026-04-11": {
+        "2026-05-09": {
           "is_working": false
         },
-        "2026-04-17": {
+        "2026-05-22": {
           "start": "10:00",
           "end": "15:00",
           "is_working": true
