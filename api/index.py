@@ -29,6 +29,8 @@ from api.reminder_scheduler import reminder_scheduler
 from api.faq_menu import send_faq_menu, send_faq_answer_by_item, get_faq_by_number
 from api.service_menu import send_service_menu
 from api.staff_intro import send_staff_intro
+from api.google_sheets_logger import get_sheets_logger
+from api.user_consent_manager import user_consent_manager
 
 load_dotenv()
 
@@ -61,6 +63,28 @@ app = FastAPI()
 
 # Global variable to track scheduler thread
 scheduler_thread = None
+
+_PROFILE_CACHE = {}
+_PROFILE_CACHE_TTL_SECONDS = 3600
+
+
+def get_cached_display_name(user_id: str) -> str:
+    import time as _time
+
+    cached = _PROFILE_CACHE.get(user_id)
+    if cached and (_time.time() - cached["fetched_at"]) <= _PROFILE_CACHE_TTL_SECONDS:
+        return cached["display_name"]
+
+    try:
+        with ApiClient(configuration) as api_client:
+            profile = MessagingApi(api_client).get_profile(user_id)
+            display_name = profile.display_name
+            _PROFILE_CACHE[user_id] = {"display_name": display_name, "fetched_at": _time.time()}
+            return display_name
+    except Exception as e:
+        logging.warning(f"Could not fetch user profile for {user_id}: {e}")
+        return cached["display_name"] if cached else "Unknown"
+
 
 
 @app.on_event("startup")
@@ -136,21 +160,13 @@ def handle_message(event: MessageEvent):
     quick_reply_items = []
     user_name = ""
 
-    # Get user display name
-    try:
-        with ApiClient(configuration) as api_client:
-            profile = MessagingApi(api_client).get_profile(user_id)
-            user_name = profile.display_name
-    except Exception as e:
-        logging.warning(f"Could not fetch user profile for {user_id}: {e}")
-        user_name = "Unknown"
+    user_name = "Unknown"
 
     # Check consent (except for consent-related messages)
     if message_text not in ["同意画面を開く", "同意する", "同意しない", "よくある質問"]:
         try:
-            from api.user_consent_manager import user_consent_manager
-
             if not user_consent_manager.has_user_consented(user_id):
+                user_name = get_cached_display_name(user_id)
                 consent_reminder = f"""🔒 プライバシー同意が必要です
 
 {user_name}さん、ボットをご利用いただくには、まず利用規約とプライバシーポリシーにご同意いただく必要があります。
@@ -195,8 +211,10 @@ def handle_message(event: MessageEvent):
     try:
         # Consent flow
         if message_text == "同意画面を開く":
+            user_name = get_cached_display_name(user_id)
             return handle_consent_screen(user_id, user_name, event.reply_token)
         elif message_text in ["同意する", "同意しない"]:
+            user_name = get_cached_display_name(user_id)
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
 
         # Service menu
@@ -364,13 +382,7 @@ def handle_postback(event: PostbackEvent):
     action = params.get("action", [None])[0]
     reply_text = ""
 
-    try:
-        with ApiClient(configuration) as api_client:
-            profile = MessagingApi(api_client).get_profile(user_id)
-            user_name = profile.display_name
-    except Exception as e:
-        logging.warning(f"Could not fetch user profile for postback {user_id}: {e}")
-        user_name = "Unknown"
+    user_name = get_cached_display_name(user_id)
 
     if action == "select_service":
         service_id = params.get("service_id", [None])[0]
@@ -421,14 +433,7 @@ def handle_follow(event: FollowEvent):
     """Handle when a user adds the bot as a friend"""
     user_id = event.source.user_id
 
-    try:
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            profile = line_bot_api.get_profile(user_id)
-            user_name = profile.display_name
-    except Exception as e:
-        logging.warning(f"Could not fetch user profile for {user_id}: {e}")
-        user_name = "Unknown"
+    user_name = get_cached_display_name(user_id)
 
     try:
         from api.notification_manager import send_user_login_notification
@@ -438,8 +443,7 @@ def handle_follow(event: FollowEvent):
         logging.error(f"Failed to send user login notification: {e}", exc_info=True)
 
     try:
-        from api.google_sheets_logger import GoogleSheetsLogger
-        sheets_logger = GoogleSheetsLogger()
+        sheets_logger = get_sheets_logger()
 
         sheets_logger.log_new_user(
             user_id=user_id,
