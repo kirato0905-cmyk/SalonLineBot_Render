@@ -248,29 +248,17 @@ class ReservationFlow:
         service_id: Optional[str],
         exclude_reservation_id: Optional[str] = None,
     ) -> Optional[str]:
-        staff_slots_map = self._get_staff_available_slots_map_for_date(
-            user_id=user_id,
-            selected_date=selected_date,
+        duration_minutes = self._calculate_time_duration_minutes(start_time, end_time)
+        assigned = self.google_calendar.assign_staff_for_free_reservation(
+            date_str=selected_date,
+            start_time=start_time,
+            duration_minutes=duration_minutes,
             service_id=service_id,
             exclude_reservation_id=exclude_reservation_id,
         )
-
-        candidates: List[str] = []
-        for staff_name, slots in staff_slots_map.items():
-            if self._time_range_fits_any_slot(slots, start_time, end_time):
-                candidates.append(staff_name)
-
-        if not candidates:
+        if not assigned:
             return None
-
-        def _order_of(name: str) -> int:
-            for _, s in self.staff_members.items():
-                if isinstance(s, dict) and s.get("name") == name:
-                    return int(s.get("order", 999))
-            return 999
-
-        candidates.sort(key=_order_of)
-        return candidates[0]
+        return assigned["staff_name"]
 
 
     def _get_config_mtime(self) -> Optional[float]:
@@ -1195,7 +1183,7 @@ class ReservationFlow:
     def _is_no_preference_staff(self, staff_name: Optional[str]) -> bool:
         if staff_name is None:
             return True
-        return str(staff_name).strip() in {"指名なし", "おまかせ", "未指定", ""}
+        return str(staff_name).strip() in {"指名なし", "おまかせ", "未指定", "", "free"}
 
     def _get_staff_display_name(self, staff_name: Optional[str]) -> str:
         if self._is_no_preference_staff(staff_name):
@@ -1221,15 +1209,22 @@ class ReservationFlow:
         if not end_time:
             service_info = self._get_service_by_id(service_id) if service_id else {}
             duration = service_info.get("duration", 60)
-            end_time = self._calculate_optimal_end_time(start_time, duration)
+        else:
+            duration = self._calculate_time_duration_minutes(start_time, end_time)
+            if duration <= 0:
+                service_info = self._get_service_by_id(service_id) if service_id else {}
+                duration = service_info.get("duration", 60)
 
-        return self.google_calendar.find_assignable_staff(
+        assigned = self.google_calendar.assign_staff_for_free_reservation(
             date_str=date_str,
             start_time=start_time,
-            end_time=end_time,
+            duration_minutes=duration,
             service_id=service_id,
             exclude_reservation_id=exclude_reservation_id,
         )
+        if not assigned:
+            return None
+        return assigned["staff_name"]
 
     def _get_staff_calendar_url(self, staff_name: str) -> str:
         staff_calendar_id = None
@@ -2000,9 +1995,11 @@ class ReservationFlow:
 
         if self._is_no_preference_staff(message_normalized):
             self.user_states[user_id]["data"]["staff"] = "指名なし"
+            self.user_states[user_id]["data"]["selected_staff"] = "free"
+            self.user_states[user_id]["data"].pop("assigned_staff", None)
             self.user_states[user_id]["step"] = "date_selection"
             self.user_states[user_id]["date_selection_back_target"] = "staff_selection"
-            intro = "担当者：指名なしですね。空いているスタッフでご案内します。\n\n"
+            intro = "担当者：指名なしですね。ご予約確定時に自動で最適なスタッフを決定します。\n\n"
             self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
                 datetime.now().date()
             ).strftime("%Y-%m-%d")
@@ -2027,6 +2024,8 @@ class ReservationFlow:
         selected_staff = staff_data.get("name")
 
         self.user_states[user_id]["data"]["staff"] = selected_staff
+        self.user_states[user_id]["data"]["selected_staff"] = selected_staff
+        self.user_states[user_id]["data"]["assigned_staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
         self.user_states[user_id]["date_selection_back_target"] = "staff_selection"
 
@@ -2386,7 +2385,7 @@ class ReservationFlow:
 
         service = self._get_service_name_by_id(sid) if sid else ""
         staff = self.user_states[user_id]["data"].get("staff")
-        staff_display = "指名なし（空いているスタッフでご案内）" if self._is_no_preference_staff(staff) else staff
+        staff_display = "指名なし（担当は自動で決定）" if self._is_no_preference_staff(staff) else staff
         price_val = service_info.get("price", 0)
 
         text = f"""ご予約内容の確認です😊
@@ -2412,16 +2411,20 @@ class ReservationFlow:
             end_time = reservation_data.get("end_time", "")
             staff_name = reservation_data.get("staff")
             user_id = reservation_data.get("user_id", "")
+            service_id = reservation_data.get("service_id") or self._get_service_id_by_name(
+                reservation_data.get("service")
+            )
 
             if not end_time:
-                sid = reservation_data.get("service_id")
-                if not sid and reservation_data.get("service"):
-                    sid = self._get_service_id_by_name(reservation_data["service"])
-                service_info = self._get_service_by_id(sid) if sid else {}
+                service_info = self._get_service_by_id(service_id) if service_id else {}
                 duration = service_info.get("duration", 60)
                 start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
                 end_dt = start_dt + timedelta(minutes=duration)
                 end_time = end_dt.strftime("%H:%M")
+            else:
+                start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
+                end_dt = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
+                duration = int((end_dt - start_dt).total_seconds() // 60)
 
             exclude_reservation_id = None
             try:
@@ -2435,16 +2438,22 @@ class ReservationFlow:
                 logging.error(f"Error detecting modification context in _check_final_availability: {e}")
 
             resolved_staff = staff_name
+            assignment_detail = None
+
             if self._is_no_preference_staff(staff_name):
-                resolved_staff = self._resolve_final_staff_for_reservation(
-                    reservation_data,
+                assignment_detail = self.google_calendar.assign_staff_for_free_reservation(
+                    date_str=date_str,
+                    start_time=start_time,
+                    duration_minutes=duration,
+                    service_id=service_id,
                     exclude_reservation_id=exclude_reservation_id,
                 )
-                if not resolved_staff:
+                if not assignment_detail:
                     return {
                         "available": False,
                         "message": "ご希望の日時ではご案内可能なスタッフがいないため、別のお時間をご確認ください。",
                     }
+                resolved_staff = assignment_detail["staff_name"]
 
             staff_available = self.google_calendar.check_staff_availability_for_time(
                 date_str,
@@ -2455,10 +2464,34 @@ class ReservationFlow:
             )
 
             if not staff_available:
-                return {
-                    "available": False,
-                    "message": f"👨‍💼 {resolved_staff}さんの{start_time}~{end_time}の時間帯は既に予約が入っているか、受付時間外です。",
-                }
+                if self._is_no_preference_staff(staff_name):
+                    reassigned = self.google_calendar.assign_staff_for_free_reservation(
+                        date_str=date_str,
+                        start_time=start_time,
+                        duration_minutes=duration,
+                        service_id=service_id,
+                        exclude_reservation_id=exclude_reservation_id,
+                    )
+                    if not reassigned:
+                        return {
+                            "available": False,
+                            "message": "ご希望の日時ではご案内可能なスタッフがいないため、別のお時間をご確認ください。",
+                        }
+                    resolved_staff = reassigned["staff_name"]
+                    assignment_detail = reassigned
+                    staff_available = self.google_calendar.check_staff_availability_for_time(
+                        date_str,
+                        start_time,
+                        end_time,
+                        resolved_staff,
+                        exclude_reservation_id,
+                    )
+
+                if not staff_available:
+                    return {
+                        "available": False,
+                        "message": f"👨‍💼 {resolved_staff}さんの{start_time}~{end_time}の時間帯は既に予約が入っているか、受付時間外です。",
+                    }
 
             user_conflict = self.google_calendar.check_user_time_conflict(
                 date_str,
@@ -2475,7 +2508,12 @@ class ReservationFlow:
                     "message": "⚠️ 同じ時間帯に他のご予約がございます。",
                 }
 
-            return {"available": True, "message": "", "resolved_staff": resolved_staff}
+            return {
+                "available": True,
+                "message": "",
+                "resolved_staff": resolved_staff,
+                "assignment_detail": assignment_detail,
+            }
 
         except Exception as e:
             logging.error(f"Error checking final availability: {e}", exc_info=True)
@@ -2516,8 +2554,13 @@ class ReservationFlow:
 
             resolved_staff = availability_check.get("resolved_staff")
             if resolved_staff:
+                reservation_data["assigned_staff"] = resolved_staff
                 reservation_data["staff"] = resolved_staff
 
+            if self._is_no_preference_staff(reservation_data.get("selected_staff")) or reservation_data.get("selected_staff") == "free":
+                reservation_data["selected_staff"] = "free"
+            else:
+                reservation_data["selected_staff"] = reservation_data.get("selected_staff") or reservation_data["staff"]
 
             reservation_id = self.google_calendar.generate_reservation_id(reservation_data["date"])
             reservation_data["reservation_id"] = reservation_id
@@ -2542,103 +2585,37 @@ class ReservationFlow:
                     "start_time": reservation_data.get("start_time", reservation_data.get("time", "")),
                     "end_time": reservation_data.get("end_time", ""),
                     "service": reservation_data["service"],
-                    "staff": reservation_data["staff"],
+                    "selected_staff": reservation_data.get("selected_staff", ""),
+                    "assigned_staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
+                    "staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
                     "duration": service_info_for_confirm.get("duration", 60),
                     "price": service_info_for_confirm.get("price", 0),
                 }
 
                 sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
                 if not sheets_success:
-                    return "申し訳ございません。予約保存中にエラーが発生しました。時間をおいてもう一度お試しください。"
-
+                    logging.warning("Failed to save reservation to sheets, but calendar creation succeeded")
             except Exception as e:
-                logging.error(f"Error saving reservation to Google Sheets: {e}", exc_info=True)
-                return "申し訳ございません。予約保存中にエラーが発生しました。"
-
-            is_modification = self.user_states[user_id].get("is_modification", False)
-            original_reservation = self.user_states[user_id].get("original_reservation")
-
-            if is_modification and original_reservation:
-                try:
-                    sheets_logger = self.sheets_logger
-
-                    original_reservation_id = original_reservation["reservation_id"]
-                    original_staff_name = original_reservation.get("staff")
-
-                    sheets_success = sheets_logger.update_reservation_status(
-                        original_reservation_id,
-                        "Cancelled",
-                    )
-                    if not sheets_success:
-                        logging.warning(
-                            f"[Modification] Failed to update Google Sheets status for {original_reservation_id}"
-                        )
-
-                    calendar_success = self.google_calendar.cancel_reservation_by_id(
-                        original_reservation_id,
-                        original_staff_name,
-                    )
-                    if not calendar_success:
-                        logging.warning(
-                            f"[Modification] Failed to delete original reservation {original_reservation_id} from Google Calendar"
-                        )
-
-                except Exception as e:
-                    logging.error(
-                        f"Failed to cancel original reservation during modification: {e}",
-                        exc_info=True,
-                    )
+                logging.error(f"Failed to save reservation to sheets: {e}", exc_info=True)
 
             try:
-                from api.notification_manager import (
-                    send_reservation_confirmation_notification,
-                    send_reservation_modification_notification,
-                )
-
-                if is_modification and original_reservation:
-                    notification_success = send_reservation_modification_notification(
-                        original_reservation,
-                        reservation_data,
-                        client_name,
-                    )
-                    if not notification_success:
-                        logging.warning(f"[Notification] Modification notification failed for user {user_id}")
-                else:
-                    send_reservation_confirmation_notification(reservation_data, client_name)
-
+                from api.notification_manager import send_reservation_confirmation_notification
+                send_reservation_confirmation_notification(reservation_data, client_name)
             except Exception as e:
-                logging.error(f"Failed to send notification: {e}", exc_info=True)
+                logging.error(f"Failed to send reservation notification: {e}", exc_info=True)
 
-            time_display = reservation_data.get("start_time", reservation_data["time"])
-            if reservation_data.get("end_time"):
-                time_display = f"{reservation_data['start_time']}~{reservation_data['end_time']}"
-
-            if is_modification and original_reservation:
-                response_text = f"""予約の変更が完了しました😊
-
-🆔：{reservation_id}
-📅：{reservation_data['date']} {time_display}
-💇：{reservation_data['service']}
-👤：{reservation_data['staff']}
-
-当日はお気をつけてお越しください。
-ご来店をお待ちしております✨"""
-            else:
-                response_text = f"""ご予約が確定しました😊
-
-🆔：{reservation_id}
-📅：{reservation_data['date']} {time_display}
-💇：{reservation_data['service']}
-👤：{reservation_data['staff']}
-
-当日はお気をつけてお越しください。
-ご来店お待ちしております✨"""
+            assigned_staff = reservation_data.get("assigned_staff") or reservation_data["staff"]
 
             if user_id in self.user_states:
                 del self.user_states[user_id]
 
-            return response_text
+            return f"""ご予約が確定しました😊
 
+日時：{reservation_data['date']} {reservation_data.get('start_time', reservation_data.get('time', ''))}~{reservation_data.get('end_time', '')}
+メニュー：{reservation_data['service']}
+担当スタッフ：{assigned_staff}
+
+ご来店を心よりお待ちしております。"""
         elif self._match_keyword_group(message_normalized, no_keywords):
             if user_id in self.user_states:
                 del self.user_states[user_id]
