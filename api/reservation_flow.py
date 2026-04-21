@@ -1,13 +1,3 @@
-"""
-Reservation flow system with intent detection, candidate suggestions, and confirmation
-Current supported flows:
-- New reservation
-- Reservation modification via re-reservation only
-- Reservation cancellation
-
-config.json integrated version
-"""
-
 import re
 import os
 import json
@@ -313,6 +303,7 @@ class ReservationFlow:
                 if start_min is None or end_min is None:
                     continue
 
+                    # bool除外
                 if isinstance(score, bool):
                     continue
                 if isinstance(score, str):
@@ -789,22 +780,97 @@ class ReservationFlow:
 
         return partial_matches
 
-    def _has_single_staff(self) -> bool:
-        active_staff = [
-            staff
-            for staff_id, staff in self.staff_members.items()
-            if staff.get("name") != "未指定"
-        ]
-        return len(active_staff) == 1
+    # =========================================================
+    # staff helper
+    # =========================================================
+    def _get_active_staff_records(self) -> List[Tuple[str, Dict[str, Any]]]:
+        """
+        config.json の staff から
+        - is_active != False
+        - name != 未指定
+        のスタッフだけを order 順で返す
+        """
+        active_staff = []
 
-    def _get_single_staff_name(self) -> Optional[str]:
-        active_staff = [
-            staff
-            for staff_id, staff in self.staff_members.items()
-            if staff.get("name") != "未指定"
+        for staff_key, staff_data in self.staff_members.items():
+            if not isinstance(staff_data, dict):
+                continue
+
+            staff_name = staff_data.get("name", staff_key)
+            is_active = staff_data.get("is_active", True)
+
+            if not is_active:
+                continue
+            if staff_name == "未指定":
+                continue
+
+            active_staff.append((staff_key, staff_data))
+
+        active_staff.sort(
+            key=lambda item: (
+                item[1].get("order", 999),
+                item[1].get("name", item[0]),
+            )
+        )
+        return active_staff
+
+    def _staff_can_handle_service(self, staff_data: Dict[str, Any], service_id: Optional[str]) -> bool:
+        """
+        service_ids が空 / 未設定なら制限なし扱い。
+        service_ids が設定されていれば、その中に service_id があるときだけ対応可。
+        """
+        if not service_id:
+            return True
+
+        service_ids = staff_data.get("service_ids")
+        if isinstance(service_ids, list) and service_ids:
+            return service_id in service_ids
+
+        return True
+
+    def _get_selectable_staff_records(
+        self,
+        service_id: Optional[str] = None,
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        staff_records = self._get_active_staff_records()
+        return [
+            (staff_key, staff_data)
+            for staff_key, staff_data in staff_records
+            if self._staff_can_handle_service(staff_data, service_id)
         ]
-        if len(active_staff) == 1:
-            return active_staff[0].get("name")
+
+    def _has_single_staff(self, service_id: Optional[str] = None) -> bool:
+        return len(self._get_selectable_staff_records(service_id)) == 1
+
+    def _get_single_staff_name(self, service_id: Optional[str] = None) -> Optional[str]:
+        staff_records = self._get_selectable_staff_records(service_id)
+        if len(staff_records) == 1:
+            return staff_records[0][1].get("name", staff_records[0][0])
+        return None
+
+    def _find_staff_record_by_name(
+        self,
+        input_name: str,
+        service_id: Optional[str] = None,
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        normalized_input = self._normalize_input_text(input_name).lower()
+        if not normalized_input:
+            return None
+
+        staff_records = self._get_selectable_staff_records(service_id)
+
+        # まず完全一致
+        for staff_key, staff_data in staff_records:
+            staff_name = str(staff_data.get("name", staff_key)).strip()
+            if normalized_input == staff_name.lower():
+                return staff_key, staff_data
+
+        # 次に部分一致
+        for staff_key, staff_data in staff_records:
+            staff_name = str(staff_data.get("name", staff_key)).strip()
+            if normalized_input in staff_name.lower() or staff_name.lower() in normalized_input:
+                return staff_key, staff_data
+
         return None
 
     def _get_staff_calendar_url(self, staff_name: str) -> str:
@@ -1034,10 +1100,20 @@ class ReservationFlow:
 
         self.user_states[user_id]["step"] = "staff_selection"
 
+        selectable_staff = self._get_selectable_staff_records(service_id)
+
+        if not selectable_staff:
+            return self._quick_reply_return(
+                f"{service_name}に対応できるスタッフが現在見つかりませんでした。別のメニューをお選びください。",
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=True,
+            )
+
         staff_items = []
         staff_lines = []
 
-        for staff_id, staff_data in self.staff_members.items():
+        for staff_id, staff_data in selectable_staff:
             staff_name = staff_data.get("name", staff_id)
             staff_items.append({"label": staff_name, "text": staff_name})
             staff_lines.append(f"・{staff_name}")
@@ -1397,21 +1473,29 @@ class ReservationFlow:
         return self._reply_after_service_selected(user_id)
 
     def start_reservation_with_staff(self, user_id: str, staff_identifier: str) -> Union[str, Dict[str, Any]]:
-        staff_name = None
-
-        if staff_identifier in self.staff_members:
-            staff_name = self.staff_members[staff_identifier].get("name", staff_identifier)
-        else:
-            for sid, sdata in self.staff_members.items():
-                if sdata.get("name") == staff_identifier:
-                    staff_name = sdata.get("name")
-                    break
-
-        if not staff_name:
-            return "申し訳ございませんが、選択されたスタッフは現在ご指定いただけません。"
-
         existing_state = self.user_states.get(user_id, {})
         existing_data = existing_state.get("data", {})
+        service_id = existing_data.get("service_id")
+
+        staff_record = None
+
+        # staff_id で来た場合
+        if staff_identifier in self.staff_members:
+            candidate = self.staff_members[staff_identifier]
+            if isinstance(candidate, dict):
+                is_active = candidate.get("is_active", True)
+                if is_active and self._staff_can_handle_service(candidate, service_id):
+                    staff_record = (staff_identifier, candidate)
+
+        # 名前で来た場合
+        if not staff_record:
+            staff_record = self._find_staff_record_by_name(staff_identifier, service_id)
+
+        if not staff_record:
+            return "申し訳ございませんが、選択されたスタッフは現在ご指定いただけません。"
+
+        _, staff_data = staff_record
+        staff_name = staff_data.get("name")
 
         existing_data["user_id"] = user_id
         existing_data["staff"] = staff_name
@@ -1431,22 +1515,29 @@ class ReservationFlow:
         self._clear_reservation_selection_after_service(user_id)
 
         if preselected_staff:
-            self.user_states[user_id]["data"]["staff"] = preselected_staff
-            self.user_states[user_id]["step"] = "date_selection"
-            self.user_states[user_id]["date_selection_back_target"] = "service_selection"
-            staff_display = f"{preselected_staff}さん" if preselected_staff != "未指定" else preselected_staff
-            intro = f"""{service_name}ですね👌
+            staff_record = self._find_staff_record_by_name(preselected_staff, service_id)
+            if staff_record:
+                _, staff_data = staff_record
+                resolved_staff_name = staff_data.get("name")
+                self.user_states[user_id]["data"]["staff"] = resolved_staff_name
+                self.user_states[user_id]["step"] = "date_selection"
+                self.user_states[user_id]["date_selection_back_target"] = "service_selection"
+                staff_display = f"{resolved_staff_name}さん" if resolved_staff_name != "未指定" else resolved_staff_name
+                intro = f"""{service_name}ですね👌
 担当者は{staff_display}になります😊
 """
-            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
-                datetime.now().date()
-            ).strftime("%Y-%m-%d")
-            reply = self._build_date_week_selection_message(user_id, context="new_reservation")
-            reply["text"] = intro + reply["text"]
-            return reply
+                self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                    datetime.now().date()
+                ).strftime("%Y-%m-%d")
+                reply = self._build_date_week_selection_message(user_id, context="new_reservation")
+                reply["text"] = intro + reply["text"]
+                return reply
 
-        if self._has_single_staff():
-            single_staff_name = self._get_single_staff_name()
+            # 事前選択スタッフが今回のメニューに非対応 / 非アクティブなら外す
+            self.user_states[user_id]["data"].pop("staff", None)
+
+        if self._has_single_staff(service_id):
+            single_staff_name = self._get_single_staff_name(service_id)
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
             self.user_states[user_id]["date_selection_back_target"] = "service_selection"
@@ -1510,23 +1601,21 @@ class ReservationFlow:
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
-        selected_staff = None
-        message_lower = message_normalized.lower()
+        service_id = self.user_states[user_id]["data"].get("service_id")
+        staff_record = self._find_staff_record_by_name(message_normalized, service_id)
 
-        for staff_id, staff_data in self.staff_members.items():
-            staff_name = staff_data.get("name", staff_id)
-            if staff_name.lower() in message_lower or message_lower in staff_name.lower():
-                selected_staff = staff_name
-                break
-
-        if not selected_staff:
+        if not staff_record:
+            selectable_staff = self._get_selectable_staff_records(service_id)
             staff_items = [
                 {"label": s.get("name", sid), "text": s.get("name", sid)}
-                for sid, s in self.staff_members.items()
+                for sid, s in selectable_staff
             ]
-            staff_lines = [f"・{s.get('name', sid)}" for sid, s in self.staff_members.items()]
+            staff_lines = [f"・{s.get('name', sid)}" for sid, s in selectable_staff]
             text = "申し訳ございませんが、そのスタッフは選択できません。下記からお選びください。\n\n" + "\n".join(staff_lines)
             return self._quick_reply_return(text, staff_items, include_cancel=True, include_back=True)
+
+        _, staff_data = staff_record
+        selected_staff = staff_data.get("name")
 
         self.user_states[user_id]["data"]["staff"] = selected_staff
         self.user_states[user_id]["step"] = "date_selection"
