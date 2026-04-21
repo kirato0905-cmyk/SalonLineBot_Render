@@ -13,6 +13,7 @@ from api.business_hours import (
     get_reservation_ui_limit_days,
 )
 from api.google_sheets_logger import get_sheets_logger
+from api.staff_attendance import get_staff_attendance_for_date
 
 
 class ReservationFlow:
@@ -1596,7 +1597,8 @@ class ReservationFlow:
 
         if not filtered_periods:
             self.user_states[user_id]["step"] = "date_selection"
-            err = f"""申し訳ございませんが、{selected_date}は{service_name}（{service_duration}分）の予約可能な時間がありません。
+            attendance_message = self._get_staff_unavailability_message(staff_name, selected_date)
+            err = attendance_message or f"""申し訳ございませんが、{selected_date}は{service_name}（{service_duration}分）の予約可能な時間がありません。
 
 他の日付をお選びください。"""
             return self._build_date_week_selection_message(
@@ -2123,6 +2125,38 @@ class ReservationFlow:
 
         return self._apply_selected_date_go_to_time_selection(user_id, selected_date)
 
+    def _get_named_staff_attendance_result(self, staff_name: Optional[str], selected_date: str) -> Dict[str, Any]:
+        try:
+            if self._is_no_preference_staff(staff_name):
+                return {"is_working": True, "source": "default", "periods": []}
+            target_date = datetime.strptime(selected_date, "%Y-%m-%d").date()
+            for _, staff_data in self.staff_members.items():
+                if isinstance(staff_data, dict) and staff_data.get("name") == staff_name:
+                    return get_staff_attendance_for_date(staff_data, target_date, fallback_to_store_hours=True)
+        except Exception as e:
+            logging.error(f"Failed to get named staff attendance result: {e}")
+        return {"is_working": False, "source": "weekly", "periods": []}
+
+    def _get_staff_unavailability_message(self, staff_name: Optional[str], selected_date: str, start_time: Optional[str] = None, end_time: Optional[str] = None) -> Optional[str]:
+        if self._is_no_preference_staff(staff_name):
+            return None
+
+        attendance = self._get_named_staff_attendance_result(staff_name, selected_date)
+        if not attendance.get("is_working"):
+            return "ご希望の日程は担当スタッフの勤務対象外となっております。\n別の日程をご確認ください。"
+
+        if start_time and end_time:
+            reason = self.google_calendar.check_staff_availability_reason(
+                date_str=selected_date,
+                start_time=start_time,
+                end_time=end_time,
+                staff_name=staff_name,
+                exclude_reservation_id=self._get_exclude_reservation_id_for_date(None, selected_date),
+            )
+            if reason == "outside":
+                return "ご希望の日時は担当スタッフの受付時間外のため、お選びいただけません。\n別のお時間をお選びください。"
+        return None
+
     def _check_advance_booking_time(self, date_str: str, start_time: str, user_id: str = None) -> tuple:
         is_modification = False
         if user_id and user_id in self.user_states:
@@ -2342,6 +2376,10 @@ class ReservationFlow:
                 break
 
         if not is_valid_range:
+            attendance_message = self._get_staff_unavailability_message(staff_name, selected_date, start_time, end_time)
+            if attendance_message:
+                return attendance_message
+
             period_strings = [f"・{period['time']}~{period['end_time']}" for period in available_periods]
             return f"""申し訳ございませんが、{start_time}から{required_duration}分の予約は空いていません。
 
@@ -2488,9 +2526,22 @@ class ReservationFlow:
                     )
 
                 if not staff_available:
+                    reason = self.google_calendar.check_staff_availability_reason(
+                        date_str,
+                        start_time,
+                        end_time,
+                        resolved_staff,
+                        exclude_reservation_id,
+                    )
+                    if reason == "off":
+                        message = "ご希望の日程は担当スタッフの勤務対象外となっております。\n別の日程をご確認ください。"
+                    elif reason == "outside":
+                        message = "ご希望の日時は担当スタッフの受付時間外のため、お選びいただけません。\n別のお時間をお選びください。"
+                    else:
+                        message = f"👨‍💼 {resolved_staff}さんの{start_time}~{end_time}の時間帯は既に予約が入っております。"
                     return {
                         "available": False,
-                        "message": f"👨‍💼 {resolved_staff}さんの{start_time}~{end_time}の時間帯は既に予約が入っているか、受付時間外です。",
+                        "message": message,
                     }
 
             user_conflict = self.google_calendar.check_user_time_conflict(
