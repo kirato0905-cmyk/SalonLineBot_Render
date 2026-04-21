@@ -519,6 +519,34 @@ class GoogleSheetsLogger:
             logging.error(f"Error setting consent for user {user_id}: {e}")
             return False
 
+    def mark_user_seen(self, user_id: str) -> bool:
+        """
+        Users シートの Last Seen を更新する。
+        user_session_manager などから呼ばれる想定。
+        """
+        users_worksheet = self._get_users_worksheet()
+        if not users_worksheet:
+            logging.error("Users worksheet not available. Cannot mark user seen.")
+            return False
+
+        try:
+            records = self._get_users_records()
+            timestamp = self._get_tokyo_timestamp()
+
+            for i, record in enumerate(records, start=2):
+                if record.get("User ID") == user_id:
+                    # Last Seen 列
+                    users_worksheet.update_cell(i, 10, timestamp)
+                    self._invalidate_cache("users_records")
+                    print(f"Updated Last Seen for user {user_id}: {timestamp}")
+                    return True
+
+            logging.warning(f"User {user_id} not found for mark_user_seen")
+            return False
+        except Exception as e:
+            logging.error(f"Failed to mark user seen for {user_id}: {e}")
+            return False
+
 
 _sheets_logger_instance = None
 
