@@ -871,7 +871,47 @@ class ReservationFlow:
             if normalized_input in staff_name.lower() or staff_name.lower() in normalized_input:
                 return staff_key, staff_data
 
+
         return None
+
+    def _is_no_preference_staff(self, staff_name: Optional[str]) -> bool:
+        if staff_name is None:
+            return True
+        return str(staff_name).strip() in {"指名なし", "おまかせ", "未指定", ""}
+
+    def _get_staff_display_name(self, staff_name: Optional[str]) -> str:
+        if self._is_no_preference_staff(staff_name):
+            return "指名なし"
+        return str(staff_name)
+
+    def _resolve_final_staff_for_reservation(
+        self,
+        reservation_data: Dict[str, Any],
+        exclude_reservation_id: str = None,
+    ) -> Optional[str]:
+        staff_name = reservation_data.get("staff")
+        if not self._is_no_preference_staff(staff_name):
+            return staff_name
+
+        date_str = reservation_data["date"]
+        start_time = reservation_data.get("start_time", reservation_data.get("time", ""))
+        end_time = reservation_data.get("end_time", "")
+        service_id = reservation_data.get("service_id") or self._get_service_id_by_name(
+            reservation_data.get("service")
+        )
+
+        if not end_time:
+            service_info = self._get_service_by_id(service_id) if service_id else {}
+            duration = service_info.get("duration", 60)
+            end_time = self._calculate_optimal_end_time(start_time, duration)
+
+        return self.google_calendar.find_assignable_staff(
+            date_str=date_str,
+            start_time=start_time,
+            end_time=end_time,
+            service_id=service_id,
+            exclude_reservation_id=exclude_reservation_id,
+        )
 
     def _get_staff_calendar_url(self, staff_name: str) -> str:
         staff_calendar_id = None
@@ -884,6 +924,7 @@ class ReservationFlow:
             return f"https://calendar.google.com/calendar/embed?src={staff_calendar_id}&ctz=Asia%2FTokyo"
         return "https://calendar.google.com/calendar"
 
+    
     def _get_available_slots(
         self,
         selected_date: str = None,
@@ -898,15 +939,18 @@ class ReservationFlow:
             if self.user_states[user_id].get("is_modification", False):
                 original_reservation = self.user_states[user_id].get("original_reservation")
 
-        if staff_name:
-            exclude_reservation_id = None
-            if original_reservation and original_reservation.get("date") == selected_date:
-                exclude_reservation_id = original_reservation.get("reservation_id")
+        exclude_reservation_id = None
+        if original_reservation and original_reservation.get("date") == selected_date:
+            exclude_reservation_id = original_reservation.get("reservation_id")
 
+        current_service_id = self._get_current_service_id(user_id) if user_id else None
+
+        if staff_name and not self._is_no_preference_staff(staff_name):
             staff_slots = self.google_calendar.get_available_slots_for_modification(
                 selected_date,
                 exclude_reservation_id,
                 staff_name,
+                current_service_id,
             )
 
             if original_reservation and original_reservation.get("date") == selected_date:
@@ -934,10 +978,16 @@ class ReservationFlow:
         start_date = datetime.strptime(selected_date, "%Y-%m-%d").replace(
             hour=0, minute=0, second=0, microsecond=0
         )
-        end_date = start_date + timedelta(days=1)
+        end_date = start_date
 
-        all_slots = self.google_calendar.get_available_slots(start_date, end_date, staff_name)
-        date_slots = [slot for slot in all_slots if slot["date"] == selected_date]
+        date_slots = self.google_calendar.get_available_slots(
+            start_date,
+            end_date,
+            None,
+            current_service_id,
+            exclude_reservation_id,
+        )
+        date_slots = [slot for slot in date_slots if slot["date"] == selected_date]
 
         if original_reservation and original_reservation.get("date") == selected_date:
             original_start_time = original_reservation.get("start_time")
@@ -1094,6 +1144,7 @@ class ReservationFlow:
             include_back=True,
         )
 
+    
     def _build_staff_selection_message(self, user_id: str) -> Dict[str, Any]:
         service_id = self.user_states[user_id]["data"].get("service_id")
         service_name = self._get_service_name_by_id(service_id) if service_id else ""
@@ -1110,8 +1161,8 @@ class ReservationFlow:
                 include_back=True,
             )
 
-        staff_items = []
-        staff_lines = []
+        staff_items = [{"label": "指名なし", "text": "指名なし"}]
+        staff_lines = ["・指名なし"]
 
         for staff_id, staff_data in selectable_staff:
             staff_name = staff_data.get("name", staff_id)
@@ -1491,6 +1542,14 @@ class ReservationFlow:
         if not staff_record:
             staff_record = self._find_staff_record_by_name(staff_identifier, service_id)
 
+        if self._is_no_preference_staff(staff_identifier):
+            existing_data["user_id"] = user_id
+            existing_data["staff"] = "指名なし"
+            existing_state["step"] = "service_selection"
+            existing_state["data"] = existing_data
+            self.user_states[user_id] = existing_state
+            return self._start_reservation(user_id)
+
         if not staff_record:
             return "申し訳ございませんが、選択されたスタッフは現在ご指定いただけません。"
 
@@ -1594,6 +1653,7 @@ class ReservationFlow:
         self.user_states[user_id]["data"]["service_id"] = service_id
         return self._reply_after_service_selected(user_id)
 
+    
     def _handle_staff_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
         message_normalized = self._normalize_input_text(message)
@@ -1601,16 +1661,28 @@ class ReservationFlow:
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
+        if self._is_no_preference_staff(message_normalized):
+            self.user_states[user_id]["data"]["staff"] = "指名なし"
+            self.user_states[user_id]["step"] = "date_selection"
+            self.user_states[user_id]["date_selection_back_target"] = "staff_selection"
+            intro = "担当者：指名なしですね。空いているスタッフでご案内します。\n\n"
+            self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                datetime.now().date()
+            ).strftime("%Y-%m-%d")
+            reply = self._build_date_week_selection_message(user_id, context="new_reservation")
+            reply["text"] = intro + reply["text"]
+            return reply
+
         service_id = self.user_states[user_id]["data"].get("service_id")
         staff_record = self._find_staff_record_by_name(message_normalized, service_id)
 
         if not staff_record:
             selectable_staff = self._get_selectable_staff_records(service_id)
-            staff_items = [
+            staff_items = [{"label": "指名なし", "text": "指名なし"}] + [
                 {"label": s.get("name", sid), "text": s.get("name", sid)}
                 for sid, s in selectable_staff
             ]
-            staff_lines = [f"・{s.get('name', sid)}" for sid, s in selectable_staff]
+            staff_lines = ["・指名なし"] + [f"・{s.get('name', sid)}" for sid, s in selectable_staff]
             text = "申し訳ございませんが、そのスタッフは選択できません。下記からお選びください。\n\n" + "\n".join(staff_lines)
             return self._quick_reply_return(text, staff_items, include_cancel=True, include_back=True)
 
@@ -1975,14 +2047,15 @@ class ReservationFlow:
         self.user_states[user_id]["step"] = "confirmation"
 
         service = self._get_service_name_by_id(sid) if sid else ""
-        staff = self.user_states[user_id]["data"]["staff"]
+        staff = self.user_states[user_id]["data"].get("staff")
+        staff_display = "指名なし（空いているスタッフでご案内）" if self._is_no_preference_staff(staff) else staff
         price_val = service_info.get("price", 0)
 
         text = f"""ご予約内容の確認です😊
 
 日時：{selected_date} {start_time}~{end_time}
 メニュー：{service}
-担当：{staff}
+担当：{staff_display}
 料金：{price_val:,}円
 
 この内容で予約を確定しますか？"""
@@ -1993,12 +2066,13 @@ class ReservationFlow:
             include_back=True,
         )
 
+    
     def _check_final_availability(self, reservation_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             date_str = reservation_data["date"]
             start_time = reservation_data.get("start_time", reservation_data.get("time", ""))
             end_time = reservation_data.get("end_time", "")
-            staff_name = reservation_data["staff"]
+            staff_name = reservation_data.get("staff")
             user_id = reservation_data.get("user_id", "")
 
             if not end_time:
@@ -2022,18 +2096,30 @@ class ReservationFlow:
             except Exception as e:
                 logging.error(f"Error detecting modification context in _check_final_availability: {e}")
 
+            resolved_staff = staff_name
+            if self._is_no_preference_staff(staff_name):
+                resolved_staff = self._resolve_final_staff_for_reservation(
+                    reservation_data,
+                    exclude_reservation_id=exclude_reservation_id,
+                )
+                if not resolved_staff:
+                    return {
+                        "available": False,
+                        "message": "ご希望の日時ではご案内可能なスタッフがいないため、別のお時間をご確認ください。",
+                    }
+
             staff_available = self.google_calendar.check_staff_availability_for_time(
                 date_str,
                 start_time,
                 end_time,
-                staff_name,
+                resolved_staff,
                 exclude_reservation_id,
             )
 
             if not staff_available:
                 return {
                     "available": False,
-                    "message": f"👨‍💼 {staff_name}さんの{start_time}~{end_time}の時間帯は既に予約が入っております。",
+                    "message": f"👨‍💼 {resolved_staff}さんの{start_time}~{end_time}の時間帯は既に予約が入っているか、受付時間外です。",
                 }
 
             user_conflict = self.google_calendar.check_user_time_conflict(
@@ -2042,7 +2128,7 @@ class ReservationFlow:
                 end_time,
                 user_id,
                 exclude_reservation_id,
-                staff_name,
+                resolved_staff,
             )
 
             if user_conflict:
@@ -2051,7 +2137,7 @@ class ReservationFlow:
                     "message": "⚠️ 同じ時間帯に他のご予約がございます。",
                 }
 
-            return {"available": True, "message": ""}
+            return {"available": True, "message": "", "resolved_staff": resolved_staff}
 
         except Exception as e:
             logging.error(f"Error checking final availability: {e}", exc_info=True)
@@ -2068,7 +2154,7 @@ class ReservationFlow:
         if self._match_keyword_group(message_normalized, yes_keywords):
             reservation_data = self.user_states[user_id]["data"].copy()
 
-            if "staff" not in reservation_data or not reservation_data.get("staff"):
+            if "staff" not in reservation_data:
                 logging.error(
                     f"[_handle_confirmation] ERROR: Staff not found in reservation_data! Data: {reservation_data}"
                 )
@@ -2089,6 +2175,11 @@ class ReservationFlow:
 
 別の時間帯でご予約いただけますでしょうか？
 「予約したい」とお送りください。"""
+
+            resolved_staff = availability_check.get("resolved_staff")
+            if resolved_staff:
+                reservation_data["staff"] = resolved_staff
+
 
             reservation_id = self.google_calendar.generate_reservation_id(reservation_data["date"])
             reservation_data["reservation_id"] = reservation_id
