@@ -17,6 +17,7 @@ from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 
 from api.business_hours import get_hours_for_date, is_closed_date, get_timezone
+from api.staff_attendance import get_staff_attendance_for_date, get_staff_effective_periods_for_date, is_staff_working_for_time
 
 
 class GoogleCalendarHelper:
@@ -248,43 +249,19 @@ class GoogleCalendarHelper:
             return store_periods
 
         staff_record = self._get_staff_record_by_name(staff_name)
-        if not staff_record:
-            return store_periods
+        return get_staff_effective_periods_for_date(
+            staff_record=staff_record,
+            target_date=target_date,
+            fallback_to_store_hours=True,
+        )
 
-        attendance = staff_record.get("attendance")
-        if not isinstance(attendance, dict) or not attendance:
-            return store_periods
-
-        weekday_key = self._get_weekday_key(target_date)
-        day_attendance = attendance.get(weekday_key)
-
-        if day_attendance is None:
-            return store_periods
-
-        if not isinstance(day_attendance, dict):
-            logging.error(
-                f"[attendance] Invalid attendance data for staff={staff_name}, date={target_date}, weekday={weekday_key}: {day_attendance}"
-            )
-            return []
-
-        is_working = day_attendance.get("is_working")
-
-        if is_working is False:
-            return []
-
-        if is_working is True:
-            staff_start = day_attendance.get("start")
-            staff_end = day_attendance.get("end")
-
-            if not staff_start or not staff_end:
-                logging.error(
-                    f"[attendance] Missing start/end for working day. staff={staff_name}, date={target_date}, weekday={weekday_key}, data={day_attendance}"
-                )
-                return []
-
-            return self._intersect_periods(store_periods, staff_start, staff_end)
-
-        return store_periods
+    def get_staff_attendance_for_date(self, staff_name: str, target_date: date) -> Dict[str, Any]:
+        staff_record = self._get_staff_record_by_name(staff_name)
+        return get_staff_attendance_for_date(
+            staff_record=staff_record,
+            target_date=target_date,
+            fallback_to_store_hours=True,
+        )
 
     def _is_within_effective_business_periods(
         self,
@@ -295,29 +272,95 @@ class GoogleCalendarHelper:
     ) -> bool:
         try:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            start_min = self._time_str_to_minutes(start_time)
-            end_min = self._time_str_to_minutes(end_time)
-
-            if start_min is None or end_min is None:
+            if not staff_name or staff_name in {"未指定", "指名なし", "おまかせ", "free"}:
+                effective_periods = self._get_effective_business_periods_for_staff(target_date, None)
+                start_min = self._time_str_to_minutes(start_time)
+                end_min = self._time_str_to_minutes(end_time)
+                if start_min is None or end_min is None:
+                    return False
+                for period in effective_periods:
+                    p_start_min = self._time_str_to_minutes(period["start"])
+                    p_end_min = self._time_str_to_minutes(period["end"])
+                    if p_start_min is None or p_end_min is None:
+                        continue
+                    if start_min >= p_start_min and end_min <= p_end_min:
+                        return True
                 return False
 
-            effective_periods = self._get_effective_business_periods_for_staff(target_date, staff_name)
-            if not effective_periods:
-                return False
-
-            for period in effective_periods:
-                p_start_min = self._time_str_to_minutes(period["start"])
-                p_end_min = self._time_str_to_minutes(period["end"])
-                if p_start_min is None or p_end_min is None:
-                    continue
-
-                if start_min >= p_start_min and end_min <= p_end_min:
-                    return True
-
-            return False
+            staff_record = self._get_staff_record_by_name(staff_name)
+            return is_staff_working_for_time(
+                staff_record=staff_record,
+                target_date=target_date,
+                start_time=start_time,
+                end_time=end_time,
+                fallback_to_store_hours=True,
+            )
         except Exception as e:
             logging.error(f"Failed to validate effective business periods: {e}", exc_info=True)
             return False
+
+    def check_staff_attendance_for_time(
+        self,
+        date_str: str,
+        start_time: str,
+        end_time: str,
+        staff_name: str,
+    ) -> bool:
+        return self._is_within_effective_business_periods(date_str, start_time, end_time, staff_name)
+
+    def check_staff_attendance_detail_for_time(
+        self,
+        date_str: str,
+        start_time: str,
+        end_time: str,
+        staff_name: str,
+    ) -> Dict[str, Any]:
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            detail = self.get_staff_attendance_for_date(staff_name, target_date)
+            detail = dict(detail)
+            detail["fits_time"] = self._is_within_effective_business_periods(date_str, start_time, end_time, staff_name)
+            return detail
+        except Exception as e:
+            logging.error(f"Failed to get staff attendance detail: {e}", exc_info=True)
+            return {"is_working": False, "source": "weekly", "periods": [], "fits_time": False}
+
+    def _attendance_unavailable_reason(
+        self,
+        date_str: str,
+        start_time: str,
+        end_time: str,
+        staff_name: str,
+    ) -> str:
+        detail = self.check_staff_attendance_detail_for_time(date_str, start_time, end_time, staff_name)
+        if not detail.get("is_working"):
+            return "off"
+        if not detail.get("fits_time"):
+            return "outside"
+        return "ok"
+
+    def check_staff_availability_reason(
+        self,
+        date_str: str,
+        start_time: str,
+        end_time: str,
+        staff_name: str,
+        exclude_reservation_id: str = None,
+    ) -> str:
+        try:
+            attendance_reason = self._attendance_unavailable_reason(date_str, start_time, end_time, staff_name)
+            if attendance_reason != "ok":
+                return attendance_reason
+
+            start_datetime = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
+            end_datetime = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
+            for event_start, event_end in self._build_event_ranges_for_staff(date_str, staff_name, exclude_reservation_id):
+                if start_datetime < event_end and end_datetime > event_start:
+                    return "busy"
+            return "ok"
+        except Exception as e:
+            logging.error(f"Error checking staff availability reason: {e}", exc_info=True)
+            return "busy"
 
     def check_staff_attendance_for_time(
         self,
@@ -872,20 +915,13 @@ class GoogleCalendarHelper:
         staff_name: str,
         exclude_reservation_id: str = None
     ) -> bool:
-        try:
-            if not self._is_within_effective_business_periods(date_str, start_time, end_time, staff_name):
-                return False
-
-            start_datetime = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
-            end_datetime = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
-
-            for event_start, event_end in self._build_event_ranges_for_staff(date_str, staff_name, exclude_reservation_id):
-                if start_datetime < event_end and end_datetime > event_start:
-                    return False
-            return True
-        except Exception as e:
-            print(f"Error checking staff availability: {e}")
-            return False
+        return self.check_staff_availability_reason(
+            date_str=date_str,
+            start_time=start_time,
+            end_time=end_time,
+            staff_name=staff_name,
+            exclude_reservation_id=exclude_reservation_id,
+        ) == "ok"
 
     def _get_all_events_for_date(self, date_str: str) -> List[Dict[str, Any]]:
         if date_str in self._all_events_cache:
@@ -1122,3 +1158,4 @@ class GoogleCalendarHelper:
             exclude_reservation_id=exclude_reservation_id,
         )
         return assigned["staff_name"] if assigned else None
+
