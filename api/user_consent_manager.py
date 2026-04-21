@@ -1,68 +1,71 @@
-"""
-User consent manager backed by Google Sheets "Users" worksheet
-"""
 import logging
-from typing import Optional
-from api.google_sheets_logger import GoogleSheetsLogger
+import time
+from typing import Dict, Any
+
+from api.google_sheets_logger import get_sheets_logger
 
 
 class UserConsentManager:
+    """Usersシート同意確認の軽量ラッパー
+
+    - 同意状態を短時間メモリキャッシュ
+    - 実データは GoogleSheetsLogger に委譲
+    """
+
     def __init__(self):
-        self.sheets_logger = GoogleSheetsLogger()
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._ttl_seconds = 30
+
+    def _get_cached(self, user_id: str):
+        item = self._cache.get(user_id)
+        if not item:
+            return None
+        if time.time() - item["fetched_at"] > self._ttl_seconds:
+            self._cache.pop(user_id, None)
+            return None
+        return item["consented"]
+
+    def _set_cached(self, user_id: str, consented: bool):
+        self._cache[user_id] = {
+            "fetched_at": time.time(),
+            "consented": bool(consented),
+        }
+
+    def invalidate_user(self, user_id: str):
+        self._cache.pop(user_id, None)
 
     def has_user_consented(self, user_id: str) -> bool:
-        """Check if user has given consent (via Users sheet)"""
         try:
-            return self.sheets_logger.has_user_consented(user_id)
+            cached = self._get_cached(user_id)
+            if cached is not None:
+                return cached
+            consented = get_sheets_logger().has_user_consented(user_id)
+            self._set_cached(user_id, consented)
+            return consented
         except Exception as e:
-            logging.error(f"Consent check failed for {user_id}: {e}")
+            logging.error(f"Failed to check user consent for {user_id}: {e}", exc_info=True)
             return False
 
     def mark_user_consented(self, user_id: str) -> bool:
-        """Mark user as having given consent (and record consent date)"""
         try:
-            return self.sheets_logger.mark_user_consented(user_id)
+            success = get_sheets_logger().mark_user_consented(user_id)
+            if success:
+                self._set_cached(user_id, True)
+            return success
         except Exception as e:
-            logging.error(f"Mark consent failed for {user_id}: {e}")
+            logging.error(f"Failed to mark user consented for {user_id}: {e}", exc_info=True)
             return False
 
     def revoke_user_consent(self, user_id: str) -> bool:
-        """Revoke user consent"""
         try:
-            return self.sheets_logger.revoke_user_consent(user_id)
+            success = get_sheets_logger().revoke_user_consent(user_id)
+            if success:
+                self._set_cached(user_id, False)
+            return success
         except Exception as e:
-            logging.error(f"Revoke consent failed for {user_id}: {e}")
+            logging.error(f"Failed to revoke user consent for {user_id}: {e}", exc_info=True)
             return False
 
-    def get_consented_user_count(self) -> int:
-        """Get total number of users who have consented"""
-        try:
-            # Count directly from sheet records
-            records = self.sheets_logger.users_worksheet.get_all_records() if self.sheets_logger.users_worksheet else []
-            return sum(1 for r in records if str(r.get('Consented', 'No')).strip().lower() in ("yes", "true", "1", "y"))
-        except Exception as e:
-            logging.error(f"Failed to count consented users: {e}")
-            return 0
 
-    def get_consent_status(self, user_id: str) -> dict:
-        """Get detailed consent status for a user"""
-        try:
-            has_consented = self.has_user_consented(user_id)
-            consent_date: Optional[str] = None
-            if has_consented and self.sheets_logger.users_worksheet:
-                for record in self.sheets_logger.users_worksheet.get_all_records():
-                    if record.get('User ID') == user_id:
-                        consent_date = record.get('Consent Date')
-                        break
-            return {
-                'user_id': user_id,
-                'has_consented': has_consented,
-                'consent_date': consent_date
-            }
-        except Exception as e:
-            logging.error(f"Failed to get consent status for {user_id}: {e}")
-            return {'user_id': user_id, 'has_consented': False, 'consent_date': None}
-
-
-# Global instance
 user_consent_manager = UserConsentManager()
+
