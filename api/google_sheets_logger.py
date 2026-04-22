@@ -31,6 +31,7 @@ class GoogleSheetsLogger:
         "Start Time",
         "End Time",
         "Service",
+        "Services JSON",
         "Selected Staff",
         "Assigned Staff",
         "Staff",
@@ -293,6 +294,7 @@ class GoogleSheetsLogger:
                 reservation_data.get("start_time", ""),
                 reservation_data.get("end_time", ""),
                 reservation_data.get("service", ""),
+                json.dumps(reservation_data.get("services", []), ensure_ascii=False),
                 selected_staff,
                 assigned_staff,
                 assigned_staff,
@@ -311,6 +313,15 @@ class GoogleSheetsLogger:
     def _record_to_reservation(self, record: Dict[str, Any]) -> Dict[str, Any]:
         selected_staff = record.get("Selected Staff", "")
         assigned_staff = record.get("Assigned Staff", "") or record.get("Staff", "")
+        services = []
+        raw_services = record.get("Services JSON", "")
+        if raw_services:
+            try:
+                parsed = json.loads(raw_services)
+                if isinstance(parsed, list):
+                    services = parsed
+            except Exception:
+                services = []
         return {
             "reservation_id": record.get("Reservation ID"),
             "user_id": record.get("User ID"),
@@ -319,6 +330,7 @@ class GoogleSheetsLogger:
             "start_time": record.get("Start Time"),
             "end_time": record.get("End Time"),
             "service": record.get("Service"),
+            "services": services,
             "selected_staff": selected_staff,
             "assigned_staff": assigned_staff,
             "staff": assigned_staff,
