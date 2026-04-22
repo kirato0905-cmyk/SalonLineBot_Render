@@ -894,8 +894,7 @@ class ReservationFlow:
         ])
         items.append({
             "label": "メニューを見る",
-            "type": "postback",
-            "data": "action=view_single_menu",
+            "text": "メニューを見る",
         })
         return self._quick_reply_return("\n".join(lines), items, include_cancel=True, include_back=False)
 
@@ -2185,8 +2184,7 @@ class ReservationFlow:
             })
         items.append({
             "label": "メニューを見る",
-            "type": "postback",
-            "data": "action=view_single_menu",
+            "text": "メニューを見る",
         })
         return items
 
