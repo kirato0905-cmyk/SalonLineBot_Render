@@ -1416,6 +1416,9 @@ class ReservationFlow:
             exclude_reservation_id = original_reservation.get("reservation_id")
 
         current_service_id = self._get_current_service_id(user_id) if user_id else None
+        current_service_ids = self._get_current_service_ids(user_id) if user_id else []
+        service_cache_key = ",".join(sorted(current_service_ids)) if current_service_ids else current_service_id
+
         runtime_cache = self._ensure_runtime_cache(user_id)
         cache_key = self._make_available_slots_cache_key(
             selected_date=selected_date,
@@ -1427,9 +1430,6 @@ class ReservationFlow:
         if runtime_cache and cache_key in runtime_cache["available_slots"]:
             cached_slots = runtime_cache["available_slots"][cache_key]
             return [dict(slot) for slot in cached_slots]
-
-        current_service_ids = self._get_current_service_ids(user_id) if user_id else []
-        service_cache_key = ",".join(sorted(current_service_ids)) if current_service_ids else current_service_id
 
         if staff_name and not self._is_no_preference_staff(staff_name):
             staff_slots = self.google_calendar.get_available_slots_for_modification(
