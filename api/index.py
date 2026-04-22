@@ -376,13 +376,22 @@ def handle_postback(event: PostbackEvent):
 
     user_name = get_cached_display_name(user_id)
 
-    if action == "select_service":
-        service_id = params.get("service_id", [None])[0]
+    if action in {"select_service", "select_featured_set"}:
+        service_id = params.get("service_id", [None])[0] or params.get("set_id", [None])[0]
         if reservation_flow:
             try:
                 reply_text = reservation_flow.start_reservation_with_service(user_id, service_id)
             except Exception as e:
                 logging.error(f"Failed to start reservation from postback: {e}", exc_info=True)
+                reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
+        else:
+            reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
+    elif action == "view_single_menu":
+        if reservation_flow:
+            try:
+                reply_text = reservation_flow.start_reservation_with_service(user_id, "単品メニューを見る")
+            except Exception as e:
+                logging.error(f"Failed to open category menu from postback: {e}", exc_info=True)
                 reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
         else:
             reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
