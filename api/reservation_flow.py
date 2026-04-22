@@ -890,7 +890,7 @@ class ReservationFlow:
         lines.extend([
             "",
             "【その他】",
-            "・単品メニューを見る",
+            "・メニューを見る",
         ])
         items.append({
             "label": "単品メニューを見る",
@@ -1109,8 +1109,8 @@ class ReservationFlow:
         text = self._build_cart_summary_text(user_id, prefix=prefix or "現在のご予約内容です。")
         items = [
             {"label": "他のメニューを追加", "text": "他のメニューを追加"},
+            {"label": "このメニューで確定", "text": "このメニューで確定"},
             {"label": "メニューを削除", "text": "メニューを削除"},
-            {"label": "この内容で確定", "text": "この内容で確定"},
         ]
         return self._quick_reply_return(
             text,
@@ -2407,7 +2407,7 @@ class ReservationFlow:
                 include_back=True,
             )
 
-        if raw == "この内容で確定":
+        if raw == "このメニューで確定":
             if not self._get_cart(user_id):
                 self.user_states[user_id]["step"] = "service_selection"
                 return self._build_initial_menu_selection_message()
@@ -2465,7 +2465,7 @@ class ReservationFlow:
             if raw == str(featured_set.get("name")):
                 return self.start_reservation_with_featured_set(user_id, str(featured_set.get("id")))
 
-        if raw in ["単品メニューを見る", "単品メニュー"]:
+        if raw in ["メニューを見る", "単品メニューを見る", "単品メニュー"]:
             self.user_states[user_id]["step"] = "service_category_selection"
             return self._build_category_selection_message()
 
