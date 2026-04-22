@@ -35,6 +35,17 @@ class ReservationFlow:
         self.confirmation_keywords = self.config_data.get("confirmation_keywords", {})
 
         self.settings_data = self._extract_settings_from_config(self.config_data)
+        self.service_categories = self.config_data.get("service_categories", [])
+        self.featured_sets = self.config_data.get("featured_sets", [])
+        self.category_input_aliases = {
+            "cut": ["カット系", "カット"],
+            "color": ["カラー系", "カラー"],
+            "perm": ["パーマ系", "パーマ"],
+            "straight": ["縮毛矯正系", "ストレート系", "ストレート"],
+            "treatment": ["トリートメント系", "トリートメント"],
+            "spa": ["ヘッドスパ系", "ヘッドスパ"],
+            "other": ["その他メニュー", "その他", "セット"],
+        }
 
         self.back_label = "← 戻る"
         self._config_mtime = self._get_config_mtime()
@@ -322,6 +333,8 @@ class ReservationFlow:
         self.confirmation_keywords = self.config_data.get("confirmation_keywords", {})
 
         self.settings_data = self._extract_settings_from_config(self.config_data)
+        self.service_categories = self.config_data.get("service_categories", [])
+        self.featured_sets = self.config_data.get("featured_sets", [])
         self._config_mtime = current_mtime
         return self.settings_data
 
@@ -756,7 +769,6 @@ class ReservationFlow:
 
         return selected[:max_count]
 
-
     def _get_service_by_id(self, service_id: str) -> Optional[Dict[str, Any]]:
         if not service_id:
             return None
@@ -770,89 +782,6 @@ class ReservationFlow:
         svc = self._get_service_by_id(service_id)
         return svc.get("name", service_id) if svc else service_id
 
-    def _get_service_categories(self) -> List[Dict[str, Any]]:
-        categories = self.config_data.get("service_categories", [])
-        if not isinstance(categories, list):
-            return []
-        normalized = []
-        for item in categories:
-            if not isinstance(item, dict):
-                continue
-            if not item.get("id") or not item.get("name"):
-                continue
-            normalized.append({
-                "id": str(item["id"]).strip(),
-                "name": str(item["name"]).strip(),
-                "display_order": int(item.get("display_order", 999) or 999),
-            })
-        normalized.sort(key=lambda x: (x["display_order"], x["name"]))
-        return normalized
-
-    def _get_active_services_for_category(self, category_id: str) -> List[Dict[str, Any]]:
-        normalized = str(category_id or "").strip()
-        services = []
-        for _key, service in self.services.items():
-            if not isinstance(service, dict):
-                continue
-            if service.get("is_active", True) is False:
-                continue
-            if str(service.get("category", "")).strip() != normalized:
-                continue
-            services.append(dict(service))
-        services.sort(key=lambda s: (int(s.get("display_order", 999) or 999), str(s.get("name", ""))))
-        return services
-
-    def _get_featured_sets(self) -> List[Dict[str, Any]]:
-        featured_sets = self.config_data.get("featured_sets", [])
-        if not isinstance(featured_sets, list):
-            return []
-
-        valid_sets: List[Dict[str, Any]] = []
-        for item in featured_sets:
-            if not isinstance(item, dict):
-                continue
-            if item.get("is_active", True) is False:
-                continue
-
-            services = item.get("services", [])
-            if not isinstance(services, list) or not services:
-                continue
-
-            built_services = []
-            is_valid = True
-            for service_id in services:
-                service = self._get_service_by_id(str(service_id).strip())
-                if not service or service.get("is_active", True) is False:
-                    is_valid = False
-                    break
-                built_services.append(service)
-
-            if not is_valid:
-                continue
-
-            normalized_item = dict(item)
-            normalized_item["services"] = [str(sid).strip() for sid in services]
-            normalized_item["resolved_services"] = built_services
-            normalized_item["display_order"] = int(item.get("display_order", 999) or 999)
-            valid_sets.append(normalized_item)
-
-        valid_sets.sort(key=lambda x: (x["display_order"], str(x.get("name", ""))))
-        return valid_sets
-
-    def _get_featured_set_by_id(self, set_id: str) -> Optional[Dict[str, Any]]:
-        normalized = str(set_id or "").strip()
-        for item in self._get_featured_sets():
-            if str(item.get("id", "")).strip() == normalized:
-                return item
-        return None
-
-    def _get_featured_set_by_name(self, set_name: str) -> Optional[Dict[str, Any]]:
-        normalized = self._normalize_input_text(set_name)
-        for item in self._get_featured_sets():
-            if self._normalize_input_text(item.get("name")) == normalized:
-                return item
-        return None
-
     def _get_current_service_id(self, user_id: str) -> Optional[str]:
         service_ids = self._get_current_service_ids(user_id)
         return service_ids[0] if service_ids else None
@@ -863,18 +792,183 @@ class ReservationFlow:
                 return service_data.get("id")
         return None
 
-    def _build_cart_item_from_service(self, service_id: str, source_set_id: Optional[str] = None, source_set_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _get_service_categories(self) -> List[Dict[str, Any]]:
+        categories = self.config_data.get("service_categories", [])
+        if not isinstance(categories, list):
+            return []
+        return sorted(
+            [c for c in categories if isinstance(c, dict) and c.get("id")],
+            key=lambda c: int(c.get("display_order", 999)),
+        )
+
+    def _get_featured_sets(self) -> List[Dict[str, Any]]:
+        featured_sets = self.config_data.get("featured_sets", [])
+        if not isinstance(featured_sets, list):
+            return []
+        valid_sets = []
+        for item in featured_sets:
+            if not isinstance(item, dict):
+                continue
+            if not item.get("is_active", True):
+                continue
+            if self._validate_featured_set(item):
+                valid_sets.append(item)
+        return sorted(valid_sets, key=lambda x: int(x.get("display_order", 999)))
+
+    def _validate_featured_set(self, featured_set: Dict[str, Any]) -> bool:
+        service_ids = featured_set.get("services", [])
+        if not isinstance(service_ids, list) or not service_ids:
+            return False
+        for service_id in service_ids:
+            service = self._get_service_by_id(service_id)
+            if not service:
+                return False
+            if service.get("is_active", True) is False:
+                return False
+        return True
+
+    def _get_featured_set_by_id(self, featured_set_id: str) -> Optional[Dict[str, Any]]:
+        normalized = self._normalize_input_text(featured_set_id)
+        for item in self._get_featured_sets():
+            if self._normalize_input_text(item.get("id")) == normalized:
+                return item
+        return None
+
+    def _get_category_name_by_id(self, category_id: str) -> str:
+        for category in self._get_service_categories():
+            if str(category.get("id")) == str(category_id):
+                return str(category.get("name"))
+        return str(category_id)
+
+    def _resolve_category_id_from_text(self, text: str) -> Optional[str]:
+        normalized = self._normalize_input_text(text)
+        if not normalized:
+            return None
+
+        for category in self._get_service_categories():
+            if normalized == self._normalize_input_text(category.get("name")):
+                return str(category.get("id"))
+            if normalized == self._normalize_input_text(category.get("id")):
+                return str(category.get("id"))
+
+        for category_id, aliases in self.category_input_aliases.items():
+            if normalized in aliases:
+                return category_id
+
+        return None
+
+    def _get_services_by_category(self, category_id: str) -> List[Tuple[str, Dict[str, Any]]]:
+        matched = []
+        for _key, service_data in self.services.items():
+            if not isinstance(service_data, dict):
+                continue
+            if service_data.get("is_active", True) is False:
+                continue
+            if str(service_data.get("category")) != str(category_id):
+                continue
+            if not service_data.get("id"):
+                continue
+            matched.append((service_data.get("id"), service_data))
+        matched.sort(key=lambda x: (int(x[1].get("display_order", 999)), str(x[1].get("name", ""))))
+        return matched
+
+    def _build_initial_menu_selection_message(self) -> Dict[str, Any]:
+        lines = [
+            "ご希望のメニューをお選びください👇",
+            "",
+            "【人気セットメニュー】",
+        ]
+        items: List[Dict[str, Any]] = []
+        for featured_set in self._get_featured_sets():
+            lines.append(f"・{featured_set.get('name')}")
+            items.append({
+                "label": str(featured_set.get("name")),
+                "type": "postback",
+                "data": f"action=select_featured_set&set_id={featured_set.get('id')}",
+            })
+
+        lines.extend([
+            "",
+            "【その他】",
+            "・単品メニューを見る",
+        ])
+        items.append({
+            "label": "単品メニューを見る",
+            "type": "postback",
+            "data": "action=view_single_menu",
+        })
+        return self._quick_reply_return("\n".join(lines), items, include_cancel=True, include_back=False)
+
+    def _build_category_selection_message(self, prefix: Optional[str] = None) -> Dict[str, Any]:
+        lines = []
+        if prefix:
+            lines.extend([prefix, ""])
+        lines.append("ご希望のメニューカテゴリをお選びください👇")
+        lines.append("")
+        items = []
+        for category in self._get_service_categories():
+            name = str(category.get("name"))
+            lines.append(f"・{name}")
+            items.append({"label": name, "text": name})
+        return self._quick_reply_return("\n".join(lines), items, include_cancel=True, include_back=True)
+
+    def _build_service_selection_message_for_category(self, user_id: str, category_id: str, prefix: Optional[str] = None) -> Dict[str, Any]:
+        category_name = self._get_category_name_by_id(category_id)
+        services = self._get_services_by_category(category_id)
+        lines = []
+        if prefix:
+            lines.extend([prefix, ""])
+        lines.append(f"{category_name}のメニューをお選びください👇")
+        lines.append("")
+        items: List[Dict[str, Any]] = []
+        for service_id, service_data in services:
+            name = str(service_data.get("name", service_id))
+            lines.append(f"・{name}")
+            items.append({
+                "label": name,
+                "type": "postback",
+                "data": f"action=select_service&service_id={service_id}",
+            })
+        self.user_states[user_id]["step"] = "service_detail_selection"
+        self.user_states[user_id].setdefault("data", {})["selected_service_category"] = category_id
+        return self._quick_reply_return("\n".join(lines), items, include_cancel=True, include_back=True)
+
+    def _add_featured_set_to_cart(self, user_id: str, featured_set_id: str) -> Dict[str, Any]:
+        featured_set = self._get_featured_set_by_id(featured_set_id)
+        if not featured_set:
+            return {"ok": False, "reason": "invalid_set"}
+
+        service_ids = featured_set.get("services", [])
+        if not isinstance(service_ids, list) or not service_ids:
+            return {"ok": False, "reason": "invalid_set"}
+
+        for service_id in service_ids:
+            if any(item.get("service_id") == service_id for item in self._get_cart(user_id)):
+                return {"ok": False, "reason": "duplicate"}
+
+        added_items = []
+        for service_id in service_ids:
+            add_result = self._add_service_to_cart(user_id, service_id)
+            if not add_result.get("ok"):
+                return add_result
+            added_items.append(add_result["item"])
+
+        data = self.user_states[user_id].setdefault("data", {})
+        data["selected_menu_label"] = featured_set.get("name")
+        data["featured_set_id"] = featured_set.get("id")
+        data["total_price"] = int(featured_set.get("price", self._get_cart_total_price(user_id)) or 0)
+        data["total_duration"] = int(featured_set.get("duration", self._get_cart_total_duration(user_id)) or 0)
+        return {"ok": True, "set": featured_set, "items": added_items}
+
+    def _build_cart_item_from_service(self, service_id: str) -> Optional[Dict[str, Any]]:
         service = self._get_service_by_id(service_id)
         if not service:
             return None
         return {
             "service_id": service.get("id"),
             "service_name": service.get("name", service_id),
-            "category": service.get("category"),
             "price": int(service.get("price", 0) or 0),
             "duration": int(service.get("duration", 0) or 0),
-            "source_set_id": source_set_id,
-            "source_set_name": source_set_name,
         }
 
     def _get_cart(self, user_id: str) -> List[Dict[str, Any]]:
@@ -891,15 +985,11 @@ class ReservationFlow:
                     service_id = self._get_service_id_by_name(service_name)
                 if not service_id:
                     continue
-                service = self._get_service_by_id(service_id)
                 normalized.append({
                     "service_id": service_id,
                     "service_name": service_name or self._get_service_name_by_id(service_id),
-                    "category": item.get("category") or (service.get("category") if service else None),
                     "price": int(item.get("price", 0) or 0),
                     "duration": int(item.get("duration", 0) or 0),
-                    "source_set_id": item.get("source_set_id"),
-                    "source_set_name": item.get("source_set_name"),
                 })
             return normalized
 
@@ -929,15 +1019,6 @@ class ReservationFlow:
     def _get_cart_total_duration(self, user_id: str) -> int:
         return sum(int(item.get("duration", 0) or 0) for item in self._get_cart(user_id))
 
-    def _get_selected_menu_label(self, user_id: str) -> Optional[str]:
-        cart = self._get_cart(user_id)
-        if not cart:
-            return None
-        source_set_names = {item.get("source_set_name") for item in cart if item.get("source_set_name")}
-        if len(source_set_names) == 1 and len(cart) == len([item for item in cart if item.get("source_set_name")]):
-            return list(source_set_names)[0]
-        return self._format_service_summary(cart)
-
     def _format_service_summary(self, services: List[Dict[str, Any]]) -> str:
         names = [str(item.get("service_name", "")).strip() for item in services if item.get("service_name")]
         return " / ".join(names)
@@ -951,67 +1032,40 @@ class ReservationFlow:
         data["services"] = [dict(item) for item in cart]
         data["service"] = self._format_service_summary(cart)
         data["service_id"] = cart[0]["service_id"] if cart else None
-        data["selected_menu_label"] = self._get_selected_menu_label(user_id) if cart else None
         data["total_duration"] = self._get_cart_total_duration(user_id)
         data["total_price"] = self._get_cart_total_price(user_id)
+        if not cart:
+            data.pop("selected_menu_label", None)
+            data.pop("featured_set_id", None)
 
-    def _can_add_service_to_cart(self, user_id: str, service_id: str) -> Dict[str, Any]:
+    def _add_service_to_cart(self, user_id: str, service_id: str) -> Dict[str, Any]:
+        state = self.user_states.setdefault(user_id, {"step": "start", "data": {"user_id": user_id}})
+        data = state.setdefault("data", {})
         cart = self._get_cart(user_id)
         if any(item.get("service_id") == service_id for item in cart):
             return {"ok": False, "reason": "duplicate"}
 
         service = self._get_service_by_id(service_id)
-        if not service or service.get("is_active", True) is False:
+        item = self._build_cart_item_from_service(service_id)
+        if not item or not service:
             return {"ok": False, "reason": "invalid"}
 
-        new_can_combine = bool(service.get("can_combine", True))
-        if cart and not new_can_combine:
+        can_combine = service.get("can_combine", True)
+        if cart and can_combine is False:
             return {"ok": False, "reason": "cannot_combine"}
 
-        for item in cart:
-            existing_service = self._get_service_by_id(item.get("service_id"))
-            if existing_service and not bool(existing_service.get("can_combine", True)):
+        for existing_item in cart:
+            existing_service = self._get_service_by_id(existing_item.get("service_id"))
+            if existing_service and existing_service.get("can_combine", True) is False:
                 return {"ok": False, "reason": "cannot_combine"}
-
-        return {"ok": True}
-
-    def _add_service_to_cart(self, user_id: str, service_id: str, source_set_id: Optional[str] = None, source_set_name: Optional[str] = None) -> Dict[str, Any]:
-        state = self.user_states.setdefault(user_id, {"step": "start", "data": {"user_id": user_id}})
-        data = state.setdefault("data", {})
-        validation = self._can_add_service_to_cart(user_id, service_id)
-        if not validation.get("ok"):
-            return validation
-
-        cart = self._get_cart(user_id)
-        item = self._build_cart_item_from_service(service_id, source_set_id=source_set_id, source_set_name=source_set_name)
-        if not item:
-            return {"ok": False, "reason": "invalid"}
 
         cart.append(item)
         data["cart"] = cart
+        if data.get("selected_menu_label") and data.get("featured_set_id"):
+            # セット選択後に単品追加されたら、表示ラベルは維持しつつ内容は単品ベースで扱う
+            pass
         self._sync_cart_to_reservation_fields(user_id)
         return {"ok": True, "item": item}
-
-    def _add_featured_set_to_cart(self, user_id: str, set_id: str) -> Dict[str, Any]:
-        featured_set = self._get_featured_set_by_id(set_id)
-        if not featured_set:
-            return {"ok": False, "reason": "invalid_set"}
-
-        added_items = []
-        for service_id in featured_set.get("services", []):
-            add_result = self._add_service_to_cart(
-                user_id,
-                service_id,
-                source_set_id=featured_set.get("id"),
-                source_set_name=featured_set.get("name"),
-            )
-            if not add_result.get("ok"):
-                return add_result
-            added_items.append(add_result["item"])
-
-        self.user_states[user_id].setdefault("data", {})["selected_menu_label"] = featured_set.get("name")
-        self._sync_cart_to_reservation_fields(user_id)
-        return {"ok": True, "set": featured_set, "items": added_items}
 
     def _remove_service_from_cart(self, user_id: str, service_id: str) -> bool:
         if user_id not in self.user_states:
@@ -1065,75 +1119,6 @@ class ReservationFlow:
             include_back=True,
         )
 
-    def _build_service_entry_items(self) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
-        for featured_set in self._get_featured_sets():
-            items.append({"label": featured_set.get("name", ""), "text": featured_set.get("name", "")})
-        items.append({"label": "単品メニューを見る", "text": "単品メニューを見る"})
-        return items
-
-    def _build_service_entry_message(self) -> Dict[str, Any]:
-        lines = ["ご希望のメニューをお選びください👇", "", "【人気セットメニュー】"]
-        for featured_set in self._get_featured_sets():
-            lines.append(f"・{featured_set.get('name', '')}")
-        lines.extend(["", "【その他】", "・単品メニューを見る"])
-        return self._quick_reply_return(
-            "\n".join(lines),
-            self._build_service_entry_items(),
-            include_cancel=True,
-            include_back=False,
-        )
-
-    def _build_category_quick_reply_items(self) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
-        for category in self._get_service_categories():
-            items.append({"label": category.get("name", ""), "text": category.get("name", "")})
-        return items
-
-    def _build_category_selection_message(self) -> Dict[str, Any]:
-        lines = ["ご希望のメニューカテゴリをお選びください👇", ""]
-        for category in self._get_service_categories():
-            lines.append(f"・{category.get('name', '')}")
-        return self._quick_reply_return(
-            "\n".join(lines),
-            self._build_category_quick_reply_items(),
-            include_cancel=True,
-            include_back=True,
-        )
-
-    def _build_service_detail_items(self, category_id: str) -> List[Dict[str, Any]]:
-        items = []
-        for service in self._get_active_services_for_category(category_id):
-            items.append({"label": service.get("name", ""), "text": service.get("name", "")})
-        return items
-
-    def _get_category_by_name(self, category_name: str) -> Optional[Dict[str, Any]]:
-        normalized = self._normalize_input_text(category_name)
-        for category in self._get_service_categories():
-            if self._normalize_input_text(category.get("name")) == normalized:
-                return category
-        return None
-
-    def _build_service_detail_message(self, category_id: str) -> Dict[str, Any]:
-        category = None
-        for item in self._get_service_categories():
-            if item.get("id") == category_id:
-                category = item
-                break
-        if not category:
-            return self._build_category_selection_message()
-
-        services = self._get_active_services_for_category(category_id)
-        lines = [f"{category.get('name', '')}メニューをお選びください👇", ""]
-        for service in services:
-            lines.append(f"・{service.get('name', '')}")
-        return self._quick_reply_return(
-            "\n".join(lines),
-            self._build_service_detail_items(category_id),
-            include_cancel=True,
-            include_back=True,
-        )
-
     def _is_back_command(self, message: str) -> bool:
         raw = str(message).strip()
         return raw in [self.back_label, "戻る"]
@@ -1158,6 +1143,7 @@ class ReservationFlow:
             final_items.append({"label": cancel_text, "text": cancel_text})
 
         return {"text": text, "quick_reply_items": final_items}
+
     def _clear_reservation_selection_after_service(self, user_id: str):
         state = self.user_states.get(user_id, {})
         data = state.get("data", {})
@@ -1892,11 +1878,11 @@ class ReservationFlow:
         data = state.get("data", {})
 
         if step == "service_selection":
-            return self._build_cart_action_message(user_id) if self._get_cart(user_id) else self._build_service_entry_message()
+            return self._build_cart_action_message(user_id) if self._get_cart(user_id) else self._build_initial_menu_selection_message()
 
         if step == "service_category_selection":
             state["step"] = "service_selection"
-            return self._build_service_entry_message()
+            return self._build_initial_menu_selection_message()
 
         if step == "service_detail_selection":
             state["step"] = "service_category_selection"
@@ -2079,6 +2065,8 @@ class ReservationFlow:
 
             if step in [
                 "service_selection",
+                "service_category_selection",
+                "service_detail_selection",
                 "service_cart",
                 "service_delete_selection",
                 "staff_selection",
@@ -2174,19 +2162,41 @@ class ReservationFlow:
 
     def _start_reservation(self, user_id: str) -> Union[str, Dict[str, Any]]:
         self.user_states[user_id]["step"] = "service_selection"
-        return self._build_service_entry_message()
+        self.user_states[user_id].setdefault("data", {"user_id": user_id})
+        return self._build_initial_menu_selection_message()
 
-    def _build_service_quick_reply_postback_items(self) -> List[Dict[str, Any]]:
-        return self._build_service_entry_items()
+    def _build_service_quick_reply_postback_items(self, category_id: Optional[str] = None) -> List[Dict[str, str]]:
+        items = []
+        if category_id:
+            for sid, data in self._get_services_by_category(category_id):
+                name = data.get("name", sid)
+                items.append({
+                    "label": name,
+                    "type": "postback",
+                    "data": f"action=select_service&service_id={sid}",
+                })
+            return items
 
-    def start_reservation_with_service(
+        for featured_set in self._get_featured_sets():
+            items.append({
+                "label": str(featured_set.get("name")),
+                "type": "postback",
+                "data": f"action=select_featured_set&set_id={featured_set.get('id')}",
+            })
+        items.append({
+            "label": "単品メニューを見る",
+            "type": "postback",
+            "data": "action=view_single_menu",
+        })
+        return items
+
+    def start_reservation_with_featured_set(
         self,
         user_id: str,
-        service_identifier: str,
+        featured_set_id: str,
     ) -> Union[str, Dict[str, Any]]:
-        raw_identifier = self._normalize_input_text(service_identifier)
-        if not raw_identifier:
-            return self._build_service_entry_message()
+        if not featured_set_id or not str(featured_set_id).strip():
+            return self._build_initial_menu_selection_message()
 
         existing_state = self.user_states.get(user_id, {})
         existing_data = existing_state.get("data", {})
@@ -2195,49 +2205,67 @@ class ReservationFlow:
         existing_state["data"] = existing_data
         self.user_states[user_id] = existing_state
 
-        if raw_identifier == "単品メニューを見る":
-            self.user_states[user_id]["step"] = "service_category_selection"
-            return self._build_category_selection_message()
-
-        featured_set = self._get_featured_set_by_id(raw_identifier) or self._get_featured_set_by_name(raw_identifier)
-        if featured_set:
-            add_result = self._add_featured_set_to_cart(user_id, featured_set.get("id"))
-            if not add_result.get("ok"):
-                reason = add_result.get("reason")
-                if reason == "duplicate":
-                    text = "すでにセット内のメニューが追加済みです。\n別のメニューをお選びください。"
-                elif reason == "cannot_combine":
-                    text = "このメニューは他のメニューと組み合わせできません。\n内容をご確認ください。"
-                else:
-                    text = "もう一度メニューをお選びください。"
-                return self._quick_reply_return(
-                    text,
-                    self._build_service_entry_items(),
-                    include_cancel=True,
-                    include_back=True,
-                )
-            self._clear_reservation_selection_after_service(user_id)
-            return self._build_cart_action_message(
-                user_id,
-                prefix=f"{featured_set.get('name', 'セットメニュー')}を追加しました。\n\n現在のご予約内容です。",
-            )
-
-        svc = self._get_service_by_id(raw_identifier)
-        if not svc:
-            return self._build_service_entry_message()
-
-        add_result = self._add_service_to_cart(user_id, raw_identifier)
+        add_result = self._add_featured_set_to_cart(user_id, featured_set_id)
         if not add_result.get("ok"):
-            reason = add_result.get("reason")
-            if reason == "duplicate":
-                text = "すでに追加済みのメニューです。\n別のメニューをお選びください。"
-            elif reason == "cannot_combine":
-                text = "このメニューは他のメニューと組み合わせできません。\n内容をご確認ください。"
+            if add_result.get("reason") == "duplicate":
+                text = "すでにセット由来で追加済みのメニューが含まれています。\n別のメニューをお選びください。"
             else:
                 text = "もう一度メニューをお選びください。"
             return self._quick_reply_return(
                 text,
-                self._build_service_entry_items(),
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=False,
+            )
+
+        self._clear_reservation_selection_after_service(user_id)
+        featured_set = add_result["set"]
+        return self._build_cart_action_message(
+            user_id,
+            prefix=f"{featured_set.get('name')}を追加しました。\n\n現在のご予約内容です。",
+        )
+
+    def start_reservation_with_service(
+        self,
+        user_id: str,
+        service_identifier: str,
+    ) -> Union[str, Dict[str, Any]]:
+        if not service_identifier or not str(service_identifier).strip():
+            text = "もう一度メニューをお選びください。"
+            return self._quick_reply_return(
+                text,
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=False,
+            )
+
+        service_id = str(service_identifier).strip()
+        svc = self._get_service_by_id(service_id)
+        if not svc:
+            text = "もう一度メニューをお選びください。"
+            return self._quick_reply_return(
+                text,
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=False,
+            )
+
+        existing_state = self.user_states.get(user_id, {})
+        existing_data = existing_state.get("data", {})
+        existing_data["user_id"] = user_id
+        existing_state["step"] = "service_selection"
+        existing_state["data"] = existing_data
+        self.user_states[user_id] = existing_state
+
+        add_result = self._add_service_to_cart(user_id, service_id)
+        if not add_result.get("ok"):
+            if add_result.get("reason") == "duplicate":
+                text = "すでに追加済みのメニューです。\n別のメニューをお選びください。"
+            else:
+                text = "もう一度メニューをお選びください。"
+            return self._quick_reply_return(
+                text,
+                self._build_service_quick_reply_postback_items(),
                 include_cancel=True,
                 include_back=True,
             )
@@ -2356,15 +2384,15 @@ class ReservationFlow:
     def _handle_service_cart(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         raw = self._normalize_input_text(message)
 
-        if raw in {"メニューを追加", "他のメニューを追加"}:
-            self.user_states[user_id]["step"] = "service_selection"
-            return self._build_service_entry_message()
+        if raw in ["他のメニューを追加", "メニューを追加"]:
+            self.user_states[user_id]["step"] = "service_category_selection"
+            return self._build_category_selection_message(prefix="追加するメニューカテゴリをお選びください👇")
 
         if raw == "メニューを削除":
             cart = self._get_cart(user_id)
             if not cart:
                 self.user_states[user_id]["step"] = "service_selection"
-                return self._build_service_entry_message()
+                return self._build_initial_menu_selection_message()
 
             self.user_states[user_id]["step"] = "service_delete_selection"
             text_lines = ["削除するメニューをお選びください👇", ""]
@@ -2382,7 +2410,7 @@ class ReservationFlow:
         if raw == "この内容で確定":
             if not self._get_cart(user_id):
                 self.user_states[user_id]["step"] = "service_selection"
-                return self._build_service_entry_message()
+                return self._build_initial_menu_selection_message()
             return self._proceed_after_cart_confirmed(user_id)
 
         return self._build_cart_action_message(user_id)
@@ -2414,7 +2442,12 @@ class ReservationFlow:
 
         if not self._get_cart(user_id):
             self.user_states[user_id]["step"] = "service_selection"
-            return self._build_service_entry_message()
+            return self._quick_reply_return(
+                "選択中のメニューがありません。\nご希望のメニューをお選びください👇",
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=True,
+            )
 
         return self._build_cart_action_message(
             user_id,
@@ -2428,19 +2461,40 @@ class ReservationFlow:
             del self.user_states[user_id]
             return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
-        if raw == "単品メニューを見る":
+        for featured_set in self._get_featured_sets():
+            if raw == str(featured_set.get("name")):
+                return self.start_reservation_with_featured_set(user_id, str(featured_set.get("id")))
+
+        if raw in ["単品メニューを見る", "単品メニュー"]:
             self.user_states[user_id]["step"] = "service_category_selection"
             return self._build_category_selection_message()
 
-        featured_set = self._get_featured_set_by_name(raw)
-        if featured_set:
-            return self.start_reservation_with_service(user_id, featured_set.get("id"))
+        return self._build_initial_menu_selection_message()
+
+    def _handle_service_category_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        raw = self._normalize_input_text(message)
+        category_id = self._resolve_category_id_from_text(raw)
+        if not category_id:
+            self.user_states[user_id]["step"] = "service_category_selection"
+            return self._build_category_selection_message(prefix="カテゴリをお選びください。")
+        return self._build_service_selection_message_for_category(user_id, category_id)
+
+    def _handle_service_detail_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
+        raw = self._normalize_input_text(message)
+        if self._match_keyword_group(raw, flow_cancel_keywords):
+            del self.user_states[user_id]
+            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
 
         normalized_input = self._normalize_service_input(raw)
         matches = self._fallback_match_service_by_text(normalized_input)
+        category_id = self.user_states[user_id].get("data", {}).get("selected_service_category")
+        if category_id:
+            category_service_ids = {sid for sid, _data in self._get_services_by_category(category_id)}
+            matches = [m for m in matches if m[0] in category_service_ids]
 
         if not matches:
-            return self._build_service_entry_message()
+            return self._build_service_selection_message_for_category(user_id, category_id, prefix="メニューを選択してください。")
 
         if len(matches) > 1:
             items = [
@@ -2459,62 +2513,19 @@ class ReservationFlow:
             )
 
         service_id, _ = matches[0]
-        return self.start_reservation_with_service(user_id, service_id)
-
-    def _handle_service_category_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        raw = self._normalize_input_text(message)
-        if self._match_keyword_group(raw, flow_cancel_keywords):
-            del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
-
-        category = self._get_category_by_name(raw)
-        if not category:
-            return self._build_category_selection_message()
-
-        self.user_states[user_id]["data"]["selected_category_id"] = category.get("id")
-        self.user_states[user_id]["step"] = "service_detail_selection"
-        return self._build_service_detail_message(category.get("id"))
-
-    def _handle_service_detail_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
-        flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
-        raw = self._normalize_input_text(message)
-        if self._match_keyword_group(raw, flow_cancel_keywords):
-            del self.user_states[user_id]
-            return "予約をキャンセルいたします。またのご利用をお待ちしております。"
-
-        category_id = self.user_states.get(user_id, {}).get("data", {}).get("selected_category_id")
-        if not category_id:
-            self.user_states[user_id]["step"] = "service_category_selection"
-            return self._build_category_selection_message()
-
-        services = self._get_active_services_for_category(category_id)
-        selected_service = None
-        for service in services:
-            if raw == service.get("name") or raw == service.get("id"):
-                selected_service = service
-                break
-
-        if not selected_service:
-            return self._build_service_detail_message(category_id)
-
-        add_result = self._add_service_to_cart(user_id, selected_service.get("id"))
+        add_result = self._add_service_to_cart(user_id, service_id)
         if not add_result.get("ok"):
-            reason = add_result.get("reason")
-            if reason == "duplicate":
+            if add_result.get("reason") == "duplicate":
                 text = "すでに追加済みのメニューです。\n別のメニューをお選びください。"
-            elif reason == "cannot_combine":
+            elif add_result.get("reason") == "cannot_combine":
                 text = "このメニューは他のメニューと組み合わせできません。\n内容をご確認ください。"
             else:
                 text = "メニューを選択してください。"
-            return self._quick_reply_return(
-                text,
-                self._build_service_detail_items(category_id),
-                include_cancel=True,
-                include_back=True,
-            )
+            return self._build_service_selection_message_for_category(user_id, category_id, prefix=text)
 
         self._clear_reservation_selection_after_service(user_id)
+        self.user_states[user_id].setdefault("data", {}).pop("selected_menu_label", None)
+        self.user_states[user_id].setdefault("data", {}).pop("featured_set_id", None)
         added_item = add_result["item"]
         return self._build_cart_action_message(
             user_id,
