@@ -250,11 +250,13 @@ class ReservationFlow:
         exclude_reservation_id: Optional[str] = None,
     ) -> Optional[str]:
         duration_minutes = self._calculate_time_duration_minutes(start_time, end_time)
+        service_ids = self._get_current_service_ids(user_id) if user_id else ([service_id] if service_id else [])
         assigned = self.google_calendar.assign_staff_for_free_reservation(
             date_str=selected_date,
             start_time=start_time,
             duration_minutes=duration_minutes,
             service_id=service_id,
+            service_ids=service_ids,
             exclude_reservation_id=exclude_reservation_id,
         )
         if not assigned:
@@ -758,20 +760,157 @@ class ReservationFlow:
         return svc.get("name", service_id) if svc else service_id
 
     def _get_current_service_id(self, user_id: str) -> Optional[str]:
-        data = self.user_states.get(user_id, {}).get("data", {})
-        sid = data.get("service_id")
-        if sid:
-            return sid
-        name = data.get("service")
-        if name:
-            return self._get_service_id_by_name(name)
-        return None
+        service_ids = self._get_current_service_ids(user_id)
+        return service_ids[0] if service_ids else None
 
     def _get_service_id_by_name(self, service_name: str) -> Optional[str]:
         for _key, service_data in self.services.items():
             if isinstance(service_data, dict) and service_data.get("name") == service_name:
                 return service_data.get("id")
         return None
+
+    def _build_cart_item_from_service(self, service_id: str) -> Optional[Dict[str, Any]]:
+        service = self._get_service_by_id(service_id)
+        if not service:
+            return None
+        return {
+            "service_id": service.get("id"),
+            "service_name": service.get("name", service_id),
+            "price": int(service.get("price", 0) or 0),
+            "duration": int(service.get("duration", 0) or 0),
+        }
+
+    def _get_cart(self, user_id: str) -> List[Dict[str, Any]]:
+        data = self.user_states.get(user_id, {}).get("data", {})
+        cart = data.get("cart", [])
+        if isinstance(cart, list):
+            normalized = []
+            for item in cart:
+                if not isinstance(item, dict):
+                    continue
+                service_id = item.get("service_id")
+                service_name = item.get("service_name") or item.get("name")
+                if not service_id and service_name:
+                    service_id = self._get_service_id_by_name(service_name)
+                if not service_id:
+                    continue
+                normalized.append({
+                    "service_id": service_id,
+                    "service_name": service_name or self._get_service_name_by_id(service_id),
+                    "price": int(item.get("price", 0) or 0),
+                    "duration": int(item.get("duration", 0) or 0),
+                })
+            return normalized
+
+        sid = data.get("service_id")
+        if sid:
+            item = self._build_cart_item_from_service(sid)
+            return [item] if item else []
+
+        service_name = data.get("service")
+        if service_name:
+            sid = self._get_service_id_by_name(service_name)
+            item = self._build_cart_item_from_service(sid) if sid else None
+            return [item] if item else []
+
+        return []
+
+    def _get_current_service_ids(self, user_id: str) -> List[str]:
+        return [
+            item["service_id"]
+            for item in self._get_cart(user_id)
+            if item.get("service_id")
+        ]
+
+    def _get_cart_total_price(self, user_id: str) -> int:
+        return sum(int(item.get("price", 0) or 0) for item in self._get_cart(user_id))
+
+    def _get_cart_total_duration(self, user_id: str) -> int:
+        return sum(int(item.get("duration", 0) or 0) for item in self._get_cart(user_id))
+
+    def _format_service_summary(self, services: List[Dict[str, Any]]) -> str:
+        names = [str(item.get("service_name", "")).strip() for item in services if item.get("service_name")]
+        return " / ".join(names)
+
+    def _sync_cart_to_reservation_fields(self, user_id: str) -> None:
+        if user_id not in self.user_states:
+            return
+        data = self.user_states[user_id].setdefault("data", {})
+        cart = self._get_cart(user_id)
+        data["cart"] = cart
+        data["services"] = [dict(item) for item in cart]
+        data["service"] = self._format_service_summary(cart)
+        data["service_id"] = cart[0]["service_id"] if cart else None
+        data["total_duration"] = self._get_cart_total_duration(user_id)
+        data["total_price"] = self._get_cart_total_price(user_id)
+
+    def _add_service_to_cart(self, user_id: str, service_id: str) -> Dict[str, Any]:
+        state = self.user_states.setdefault(user_id, {"step": "start", "data": {"user_id": user_id}})
+        data = state.setdefault("data", {})
+        cart = self._get_cart(user_id)
+        if any(item.get("service_id") == service_id for item in cart):
+            return {"ok": False, "reason": "duplicate"}
+
+        item = self._build_cart_item_from_service(service_id)
+        if not item:
+            return {"ok": False, "reason": "invalid"}
+
+        cart.append(item)
+        data["cart"] = cart
+        self._sync_cart_to_reservation_fields(user_id)
+        return {"ok": True, "item": item}
+
+    def _remove_service_from_cart(self, user_id: str, service_id: str) -> bool:
+        if user_id not in self.user_states:
+            return False
+        data = self.user_states[user_id].setdefault("data", {})
+        cart = self._get_cart(user_id)
+        new_cart = [item for item in cart if item.get("service_id") != service_id]
+        if len(new_cart) == len(cart):
+            return False
+        data["cart"] = new_cart
+        self._sync_cart_to_reservation_fields(user_id)
+        return True
+
+    def _has_staff_service_capability(self, staff_data: Dict[str, Any], service_ids: List[str]) -> bool:
+        if not service_ids:
+            return True
+        configured = staff_data.get("service_ids")
+        if isinstance(configured, list) and configured:
+            return all(service_id in configured for service_id in service_ids)
+        return True
+
+    def _build_cart_summary_text(self, user_id: str, prefix: str = "現在のご予約内容です。") -> str:
+        cart = self._get_cart(user_id)
+        if not cart:
+            return "選択中のメニューがありません。\nご希望のメニューをお選びください👇"
+
+        lines = [prefix, ""]
+        for item in cart:
+            lines.append(f"・{item.get('service_name', '')}")
+        lines.extend([
+            "",
+            f"合計金額：{self._get_cart_total_price(user_id):,}円",
+            f"合計時間：{self._get_cart_total_duration(user_id)}分",
+            "",
+            "次の操作をお選びください👇",
+        ])
+        return "\n".join(lines)
+
+    def _build_cart_action_message(self, user_id: str, prefix: Optional[str] = None) -> Dict[str, Any]:
+        self.user_states[user_id]["step"] = "service_cart"
+        text = self._build_cart_summary_text(user_id, prefix=prefix or "現在のご予約内容です。")
+        items = [
+            {"label": "メニューを追加", "text": "メニューを追加"},
+            {"label": "メニューを削除", "text": "メニューを削除"},
+            {"label": "この内容で確定", "text": "この内容で確定"},
+        ]
+        return self._quick_reply_return(
+            text,
+            items,
+            include_cancel=True,
+            include_back=True,
+        )
 
     def _is_back_command(self, message: str) -> bool:
         raw = str(message).strip()
@@ -1128,22 +1267,25 @@ class ReservationFlow:
         """
         if not service_id:
             return True
-
-        service_ids = staff_data.get("service_ids")
-        if isinstance(service_ids, list) and service_ids:
-            return service_id in service_ids
-
-        return True
+        return self._has_staff_service_capability(staff_data, [service_id])
 
     def _get_selectable_staff_records(
         self,
         service_id: Optional[str] = None,
     ) -> List[Tuple[str, Dict[str, Any]]]:
+        service_ids = [service_id] if service_id else []
+        return self._get_selectable_staff_records_for_cart(service_ids)
+
+    def _get_selectable_staff_records_for_cart(
+        self,
+        service_ids: Optional[List[str]] = None,
+    ) -> List[Tuple[str, Dict[str, Any]]]:
         staff_records = self._get_active_staff_records()
+        normalized_ids = [sid for sid in (service_ids or []) if sid]
         return [
             (staff_key, staff_data)
             for staff_key, staff_data in staff_records
-            if self._staff_can_handle_service(staff_data, service_id)
+            if self._has_staff_service_capability(staff_data, normalized_ids)
         ]
 
     def _has_single_staff(self, service_id: Optional[str] = None) -> bool:
@@ -1203,24 +1345,29 @@ class ReservationFlow:
         date_str = reservation_data["date"]
         start_time = reservation_data.get("start_time", reservation_data.get("time", ""))
         end_time = reservation_data.get("end_time", "")
-        service_id = reservation_data.get("service_id") or self._get_service_id_by_name(
+        services = reservation_data.get("services") or reservation_data.get("cart") or []
+        service_ids = [
+            item.get("service_id")
+            for item in services
+            if isinstance(item, dict) and item.get("service_id")
+        ]
+        service_id = service_ids[0] if service_ids else reservation_data.get("service_id") or self._get_service_id_by_name(
             reservation_data.get("service")
         )
 
         if not end_time:
-            service_info = self._get_service_by_id(service_id) if service_id else {}
-            duration = service_info.get("duration", 60)
+            duration = int(reservation_data.get("total_duration", 0) or 0) or 60
         else:
             duration = self._calculate_time_duration_minutes(start_time, end_time)
             if duration <= 0:
-                service_info = self._get_service_by_id(service_id) if service_id else {}
-                duration = service_info.get("duration", 60)
+                duration = int(reservation_data.get("total_duration", 0) or 0) or 60
 
         assigned = self.google_calendar.assign_staff_for_free_reservation(
             date_str=date_str,
             start_time=start_time,
             duration_minutes=duration,
             service_id=service_id,
+            service_ids=service_ids,
             exclude_reservation_id=exclude_reservation_id,
         )
         if not assigned:
@@ -1409,9 +1556,7 @@ class ReservationFlow:
             ds = d.strftime("%Y-%m-%d")
             if context == "new_reservation":
                 staff_name = self.user_states[user_id]["data"].get("staff")
-                sid = self._get_current_service_id(user_id)
-                svc = self._get_service_by_id(sid) if sid else {}
-                duration = int(svc.get("duration", 60))
+                duration = self._get_cart_total_duration(user_id) or 60
                 if self._date_has_fittable_slot_new_booking(user_id, ds, staff_name, duration):
                     dates_out.append(ds)
 
@@ -1478,19 +1623,17 @@ class ReservationFlow:
 
     
     def _build_staff_selection_message(self, user_id: str) -> Dict[str, Any]:
-        service_id = self.user_states[user_id]["data"].get("service_id")
-        service_name = self._get_service_name_by_id(service_id) if service_id else ""
+        service_ids = self._get_current_service_ids(user_id)
+        service_name = self._format_service_summary(self._get_cart(user_id))
 
         self.user_states[user_id]["step"] = "staff_selection"
 
-        selectable_staff = self._get_selectable_staff_records(service_id)
+        selectable_staff = self._get_selectable_staff_records_for_cart(service_ids)
 
         if not selectable_staff:
-            return self._quick_reply_return(
-                f"{service_name}に対応できるスタッフが現在見つかりませんでした。別のメニューをお選びください。",
-                self._build_service_quick_reply_postback_items(),
-                include_cancel=True,
-                include_back=True,
+            return self._build_cart_action_message(
+                user_id,
+                prefix="選択されたメニュー内容に対応可能なスタッフがいないため、別のメニューをご確認ください。\n\n現在のご予約内容です。",
             )
 
         staff_items = [{"label": "指名なし", "text": "指名なし"}]
@@ -1518,27 +1661,33 @@ class ReservationFlow:
         data = state.get("data", {})
 
         if step == "service_selection":
-            text = "この画面では戻れません。メニューをお選びください。"
-            return self._quick_reply_return(
-                text,
+            return self._build_cart_action_message(user_id) if self._get_cart(user_id) else self._quick_reply_return(
+                "この画面では戻れません。メニューをお選びください。",
                 self._build_service_quick_reply_postback_items(),
                 include_cancel=True,
                 include_back=False,
             )
 
+        if step == "service_delete_selection":
+            return self._build_cart_action_message(user_id)
+
+        if step == "service_cart":
+            text = "この画面では戻れません。"
+            return self._build_cart_action_message(user_id, prefix=text + "\n\n現在のご予約内容です。")
+
         if step == "staff_selection":
             data.pop("staff", None)
             self._clear_reservation_selection_after_staff(user_id)
-            state["step"] = "service_selection"
-            return self._start_reservation(user_id)
+            state["step"] = "service_cart"
+            return self._build_cart_action_message(user_id)
 
         if step == "date_selection":
             self._clear_reservation_selection_after_staff(user_id)
             back_target = state.get("date_selection_back_target", "staff_selection")
 
-            if back_target == "service_selection":
-                state["step"] = "service_selection"
-                return self._start_reservation(user_id)
+            if back_target in {"service_selection", "service_cart"}:
+                state["step"] = "service_cart"
+                return self._build_cart_action_message(user_id)
 
             data.pop("staff", None)
             return self._build_staff_selection_message(user_id)
@@ -1588,10 +1737,8 @@ class ReservationFlow:
         available_slots = self._get_available_slots(selected_date, staff_name, user_id)
         available_periods = [slot for slot in available_slots if slot["available"]]
 
-        sid = self._get_current_service_id(user_id)
-        service_info = self._get_service_by_id(sid) if sid else {}
-        service_duration = service_info.get("duration", 60)
-        service_name = self._get_service_name_by_id(sid) if sid else ""
+        service_duration = self._get_cart_total_duration(user_id) or 60
+        service_name = self._format_service_summary(self._get_cart(user_id))
 
         filtered_periods = self._periods_fittable_for_service(available_periods, service_duration)
 
@@ -1698,6 +1845,8 @@ class ReservationFlow:
 
             if step in [
                 "service_selection",
+                "service_cart",
+                "service_delete_selection",
                 "staff_selection",
                 "date_selection",
                 "time_selection",
@@ -1770,6 +1919,10 @@ class ReservationFlow:
             return self._start_reservation(user_id)
         elif step == "service_selection":
             return self._handle_service_selection(user_id, message)
+        elif step == "service_cart":
+            return self._handle_service_cart(user_id, message)
+        elif step == "service_delete_selection":
+            return self._handle_service_delete_selection(user_id, message)
         elif step == "staff_selection":
             return self._handle_staff_selection(user_id, message)
         elif step == "date_selection":
@@ -1848,19 +2001,34 @@ class ReservationFlow:
         existing_state = self.user_states.get(user_id, {})
         existing_data = existing_state.get("data", {})
         existing_data["user_id"] = user_id
-        existing_data["service_id"] = service_id
-
         existing_state["step"] = "service_selection"
         existing_state["data"] = existing_data
-
         self.user_states[user_id] = existing_state
 
-        return self._reply_after_service_selected(user_id)
+        add_result = self._add_service_to_cart(user_id, service_id)
+        if not add_result.get("ok"):
+            if add_result.get("reason") == "duplicate":
+                text = "すでに追加済みのメニューです。\n別のメニューをお選びください。"
+            else:
+                text = "もう一度メニューをお選びください。"
+            return self._quick_reply_return(
+                text,
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=True,
+            )
+
+        self._clear_reservation_selection_after_service(user_id)
+        added_item = add_result["item"]
+        return self._build_cart_action_message(
+            user_id,
+            prefix=f"{added_item['service_name']}を追加しました。\n\n現在のご予約内容です。",
+        )
 
     def start_reservation_with_staff(self, user_id: str, staff_identifier: str) -> Union[str, Dict[str, Any]]:
         existing_state = self.user_states.get(user_id, {})
         existing_data = existing_state.get("data", {})
-        service_id = existing_data.get("service_id")
+        service_ids = self._get_current_service_ids(user_id)
 
         staff_record = None
 
@@ -1869,12 +2037,12 @@ class ReservationFlow:
             candidate = self.staff_members[staff_identifier]
             if isinstance(candidate, dict):
                 is_active = candidate.get("is_active", True)
-                if is_active and self._staff_can_handle_service(candidate, service_id):
+                if is_active and self._has_staff_service_capability(candidate, service_ids):
                     staff_record = (staff_identifier, candidate)
 
         # 名前で来た場合
         if not staff_record:
-            staff_record = self._find_staff_record_by_name(staff_identifier, service_id)
+            staff_record = self._find_staff_record_by_name(staff_identifier, None)
 
         if self._is_no_preference_staff(staff_identifier):
             existing_data["user_id"] = user_id
@@ -1888,6 +2056,9 @@ class ReservationFlow:
             return "申し訳ございませんが、選択されたスタッフは現在ご指定いただけません。"
 
         _, staff_data = staff_record
+        if not self._has_staff_service_capability(staff_data, service_ids):
+            return "選択されたメニュー内容に対応可能なスタッフではありません。別のスタッフをご選択ください。"
+
         staff_name = staff_data.get("name")
 
         existing_data["user_id"] = user_id
@@ -1900,40 +2071,50 @@ class ReservationFlow:
 
         return self._start_reservation(user_id)
 
-    def _reply_after_service_selected(self, user_id: str) -> Union[str, Dict[str, Any]]:
-        service_id = self.user_states[user_id]["data"].get("service_id")
-        service_name = self._get_service_name_by_id(service_id) if service_id else ""
+    def _proceed_after_cart_confirmed(self, user_id: str) -> Union[str, Dict[str, Any]]:
+        self._sync_cart_to_reservation_fields(user_id)
+        cart = self._get_cart(user_id)
+        service_ids = self._get_current_service_ids(user_id)
+        service_name = self._format_service_summary(cart)
         preselected_staff = self.user_states[user_id]["data"].get("staff")
 
         self._clear_reservation_selection_after_service(user_id)
 
+        selectable_staff = self._get_selectable_staff_records_for_cart(service_ids)
+        if not selectable_staff:
+            self.user_states[user_id]["step"] = "service_cart"
+            return self._build_cart_action_message(
+                user_id,
+                prefix="選択されたメニュー内容に対応可能なスタッフがいないため、別のメニューをご確認ください。\n\n現在のご予約内容です。",
+            )
+
         if preselected_staff:
-            staff_record = self._find_staff_record_by_name(preselected_staff, service_id)
+            staff_record = self._find_staff_record_by_name(preselected_staff, None)
             if staff_record:
                 _, staff_data = staff_record
-                resolved_staff_name = staff_data.get("name")
-                self.user_states[user_id]["data"]["staff"] = resolved_staff_name
-                self.user_states[user_id]["step"] = "date_selection"
-                self.user_states[user_id]["date_selection_back_target"] = "service_selection"
-                staff_display = f"{resolved_staff_name}さん" if resolved_staff_name != "未指定" else resolved_staff_name
-                intro = f"""{service_name}ですね👌
+                if self._has_staff_service_capability(staff_data, service_ids):
+                    resolved_staff_name = staff_data.get("name")
+                    self.user_states[user_id]["data"]["staff"] = resolved_staff_name
+                    self.user_states[user_id]["step"] = "date_selection"
+                    self.user_states[user_id]["date_selection_back_target"] = "service_cart"
+                    staff_display = f"{resolved_staff_name}さん" if resolved_staff_name != "未指定" else resolved_staff_name
+                    intro = f"""{service_name}ですね👌
 担当者は{staff_display}になります😊
 """
-                self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
-                    datetime.now().date()
-                ).strftime("%Y-%m-%d")
-                reply = self._build_date_week_selection_message(user_id, context="new_reservation")
-                reply["text"] = intro + reply["text"]
-                return reply
+                    self.user_states[user_id]["date_selection_week_start"] = self._calendar_week_monday(
+                        datetime.now().date()
+                    ).strftime("%Y-%m-%d")
+                    reply = self._build_date_week_selection_message(user_id, context="new_reservation")
+                    reply["text"] = intro + reply["text"]
+                    return reply
 
-            # 事前選択スタッフが今回のメニューに非対応 / 非アクティブなら外す
             self.user_states[user_id]["data"].pop("staff", None)
 
-        if self._has_single_staff(service_id):
-            single_staff_name = self._get_single_staff_name(service_id)
+        if len(selectable_staff) == 1:
+            single_staff_name = selectable_staff[0][1].get("name", selectable_staff[0][0])
             self.user_states[user_id]["data"]["staff"] = single_staff_name
             self.user_states[user_id]["step"] = "date_selection"
-            self.user_states[user_id]["date_selection_back_target"] = "service_selection"
+            self.user_states[user_id]["date_selection_back_target"] = "service_cart"
             intro = f"""{service_name}ですね👌
 
 担当者は{single_staff_name}になります😊
@@ -1947,6 +2128,94 @@ class ReservationFlow:
 
         self.user_states[user_id]["date_selection_back_target"] = "staff_selection"
         return self._build_staff_selection_message(user_id)
+
+    def _handle_service_cart(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        raw = self._normalize_input_text(message)
+
+        if raw == "メニューを追加":
+            self.user_states[user_id]["step"] = "service_selection"
+            return self._quick_reply_return(
+                "追加するメニューをお選びください👇",
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=True,
+            )
+
+        if raw == "メニューを削除":
+            cart = self._get_cart(user_id)
+            if not cart:
+                self.user_states[user_id]["step"] = "service_selection"
+                return self._quick_reply_return(
+                    "選択中のメニューがありません。\nご希望のメニューをお選びください👇",
+                    self._build_service_quick_reply_postback_items(),
+                    include_cancel=True,
+                    include_back=True,
+                )
+
+            self.user_states[user_id]["step"] = "service_delete_selection"
+            text_lines = ["削除するメニューをお選びください👇", ""]
+            items = []
+            for item in cart:
+                text_lines.append(f"・{item.get('service_name', '')}")
+                items.append({"label": item.get("service_name", ""), "text": item.get("service_name", "")})
+            return self._quick_reply_return(
+                "\n".join(text_lines),
+                items,
+                include_cancel=True,
+                include_back=True,
+            )
+
+        if raw == "この内容で確定":
+            if not self._get_cart(user_id):
+                self.user_states[user_id]["step"] = "service_selection"
+                return self._quick_reply_return(
+                    "メニューが選択されていません。\nご希望のメニューをお選びください👇",
+                    self._build_service_quick_reply_postback_items(),
+                    include_cancel=True,
+                    include_back=True,
+                )
+            return self._proceed_after_cart_confirmed(user_id)
+
+        return self._build_cart_action_message(user_id)
+
+    def _handle_service_delete_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
+        raw = self._normalize_input_text(message)
+        cart = self._get_cart(user_id)
+
+        target_item = None
+        for item in cart:
+            if raw == item.get("service_name") or raw == item.get("service_id"):
+                target_item = item
+                break
+
+        if not target_item:
+            text_lines = ["削除するメニューをお選びください👇", ""]
+            items = []
+            for item in cart:
+                text_lines.append(f"・{item.get('service_name', '')}")
+                items.append({"label": item.get("service_name", ""), "text": item.get("service_name", "")})
+            return self._quick_reply_return(
+                "\n".join(text_lines),
+                items,
+                include_cancel=True,
+                include_back=True,
+            )
+
+        self._remove_service_from_cart(user_id, target_item["service_id"])
+
+        if not self._get_cart(user_id):
+            self.user_states[user_id]["step"] = "service_selection"
+            return self._quick_reply_return(
+                "選択中のメニューがありません。\nご希望のメニューをお選びください👇",
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=True,
+            )
+
+        return self._build_cart_action_message(
+            user_id,
+            prefix=f"{target_item['service_name']}を削除しました。\n\n現在のご予約内容です。",
+        )
 
     def _handle_service_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
         flow_cancel_keywords = self.navigation_keywords.get("flow_cancel", [])
@@ -1964,7 +2233,7 @@ class ReservationFlow:
                 text,
                 self._build_service_quick_reply_postback_items(),
                 include_cancel=True,
-                include_back=False,
+                include_back=True,
             )
 
         if len(matches) > 1:
@@ -1980,12 +2249,29 @@ class ReservationFlow:
                 "複数該当しました。どちらにしますか？",
                 items,
                 include_cancel=True,
-                include_back=False,
+                include_back=True,
             )
 
         service_id, _ = matches[0]
-        self.user_states[user_id]["data"]["service_id"] = service_id
-        return self._reply_after_service_selected(user_id)
+        add_result = self._add_service_to_cart(user_id, service_id)
+        if not add_result.get("ok"):
+            if add_result.get("reason") == "duplicate":
+                text = "すでに追加済みのメニューです。\n別のメニューをお選びください。"
+            else:
+                text = "メニューを選択してください。"
+            return self._quick_reply_return(
+                text,
+                self._build_service_quick_reply_postback_items(),
+                include_cancel=True,
+                include_back=True,
+            )
+
+        self._clear_reservation_selection_after_service(user_id)
+        added_item = add_result["item"]
+        return self._build_cart_action_message(
+            user_id,
+            prefix=f"{added_item['service_name']}を追加しました。\n\n現在のご予約内容です。",
+        )
 
     
     def _handle_staff_selection(self, user_id: str, message: str) -> Union[str, Dict[str, Any]]:
@@ -2009,11 +2295,14 @@ class ReservationFlow:
             reply["text"] = intro + reply["text"]
             return reply
 
-        service_id = self.user_states[user_id]["data"].get("service_id")
-        staff_record = self._find_staff_record_by_name(message_normalized, service_id)
+        service_ids = self._get_current_service_ids(user_id)
+        staff_record = self._find_staff_record_by_name(message_normalized, None)
+
+        if staff_record and not self._has_staff_service_capability(staff_record[1], service_ids):
+            staff_record = None
 
         if not staff_record:
-            selectable_staff = self._get_selectable_staff_records(service_id)
+            selectable_staff = self._get_selectable_staff_records_for_cart(service_ids)
             staff_items = [{"label": "指名なし", "text": "指名なし"}] + [
                 {"label": s.get("name", sid), "text": s.get("name", sid)}
                 for sid, s in selectable_staff
@@ -2235,13 +2524,8 @@ class ReservationFlow:
                 "time_selection_date",
                 self.user_states[user_id]["data"]["date"],
             )
-            sid = self._get_current_service_id(user_id)
-            service_name = self._get_service_name_by_id(sid) if sid else ""
-            service_duration = (
-                (self._get_service_by_id(sid) or {}).get("duration", 60)
-                if sid
-                else self.user_states[user_id].get("time_selection_service_duration", 60)
-            )
+            service_name = self._format_service_summary(self._get_cart(user_id))
+            service_duration = self._get_cart_total_duration(user_id) or self.user_states[user_id].get("time_selection_service_duration", 60)
 
             staff_name = self.user_states[user_id]["data"].get("staff")
             available_slots = self._get_available_slots(selected_date, staff_name, user_id)
@@ -2296,9 +2580,7 @@ class ReservationFlow:
             available_slots = self._get_available_slots(selected_date, staff_name, user_id)
             available_periods = [slot for slot in available_slots if slot["available"]]
 
-            sid = self._get_current_service_id(user_id)
-            service_info = self._get_service_by_id(sid) if sid else {}
-            service_duration = service_info.get("duration", 60)
+            service_duration = self._get_cart_total_duration(user_id) or 60
 
             filtered_periods = []
             for period in available_periods:
@@ -2420,11 +2702,12 @@ class ReservationFlow:
         self.user_states[user_id]["data"]["end_time"] = end_time
         self.user_states[user_id]["data"]["time"] = start_time
         self.user_states[user_id]["step"] = "confirmation"
+        self._sync_cart_to_reservation_fields(user_id)
 
-        service = self._get_service_name_by_id(sid) if sid else ""
+        service = self._format_service_summary(self._get_cart(user_id))
         staff = self.user_states[user_id]["data"].get("staff")
         staff_display = "指名なし（担当は自動で決定）" if self._is_no_preference_staff(staff) else staff
-        price_val = service_info.get("price", 0)
+        price_val = self._get_cart_total_price(user_id)
 
         text = f"""ご予約内容の確認です😊
 
@@ -2449,13 +2732,16 @@ class ReservationFlow:
             end_time = reservation_data.get("end_time", "")
             staff_name = reservation_data.get("staff")
             user_id = reservation_data.get("user_id", "")
-            service_id = reservation_data.get("service_id") or self._get_service_id_by_name(
-                reservation_data.get("service")
-            )
+            services = reservation_data.get("services") or reservation_data.get("cart") or []
+            service_ids = [
+                item.get("service_id")
+                for item in services
+                if isinstance(item, dict) and item.get("service_id")
+            ]
+            total_duration = int(reservation_data.get("total_duration", 0) or 0)
 
             if not end_time:
-                service_info = self._get_service_by_id(service_id) if service_id else {}
-                duration = service_info.get("duration", 60)
+                duration = total_duration or 60
                 start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
                 end_dt = start_dt + timedelta(minutes=duration)
                 end_time = end_dt.strftime("%H:%M")
@@ -2483,7 +2769,7 @@ class ReservationFlow:
                     date_str=date_str,
                     start_time=start_time,
                     duration_minutes=duration,
-                    service_id=service_id,
+                    service_ids=service_ids,
                     exclude_reservation_id=exclude_reservation_id,
                 )
                 if not assignment_detail:
@@ -2492,6 +2778,14 @@ class ReservationFlow:
                         "message": "ご希望の日時ではご案内可能なスタッフがいないため、別のお時間をご確認ください。",
                     }
                 resolved_staff = assignment_detail["staff_name"]
+
+            if not self._is_no_preference_staff(resolved_staff):
+                staff_record = self._find_staff_record_by_name(resolved_staff, None)
+                if not staff_record or not self._has_staff_service_capability(staff_record[1], service_ids):
+                    return {
+                        "available": False,
+                        "message": "選択されたメニュー内容に対応可能なスタッフがいないため、別のメニューをご確認ください。",
+                    }
 
             staff_available = self.google_calendar.check_staff_availability_for_time(
                 date_str,
@@ -2507,7 +2801,7 @@ class ReservationFlow:
                         date_str=date_str,
                         start_time=start_time,
                         duration_minutes=duration,
-                        service_id=service_id,
+                        service_ids=service_ids,
                         exclude_reservation_id=exclude_reservation_id,
                     )
                     if not reassigned:
@@ -2579,6 +2873,7 @@ class ReservationFlow:
         message_normalized = self._normalize_input_text(message)
 
         if self._match_keyword_group(message_normalized, yes_keywords):
+            self._sync_cart_to_reservation_fields(user_id)
             reservation_data = self.user_states[user_id]["data"].copy()
 
             if "staff" not in reservation_data:
@@ -2587,11 +2882,19 @@ class ReservationFlow:
                 )
                 return "申し訳ございませんがエラーが発生しました。「やめる」とお送りして、もう一度最初からやり直してください。"
 
-            sid = reservation_data.get("service_id") or self._get_service_id_by_name(reservation_data.get("service"))
-            if sid:
-                reservation_data["service_id"] = sid
-                reservation_data["service"] = self._get_service_name_by_id(sid)
-            service_info_for_confirm = self._get_service_by_id(sid) if sid else {}
+            services = reservation_data.get("services") or reservation_data.get("cart") or []
+            if not services:
+                return "メニューが選択されていません。ご希望のメニューをお選びください👇"
+
+            reservation_data["services"] = [dict(item) for item in services]
+            reservation_data["service"] = self._format_service_summary(reservation_data["services"])
+            reservation_data["total_duration"] = int(reservation_data.get("total_duration", 0) or 0) or sum(
+                int(item.get("duration", 0) or 0) for item in reservation_data["services"]
+            )
+            reservation_data["total_price"] = int(reservation_data.get("total_price", 0) or 0) or sum(
+                int(item.get("price", 0) or 0) for item in reservation_data["services"]
+            )
+            reservation_data["service_id"] = reservation_data["services"][0].get("service_id") if reservation_data["services"] else None
 
             availability_check = self._check_final_availability(reservation_data)
             if not availability_check["available"]:
@@ -2636,11 +2939,12 @@ class ReservationFlow:
                     "start_time": reservation_data.get("start_time", reservation_data.get("time", "")),
                     "end_time": reservation_data.get("end_time", ""),
                     "service": reservation_data["service"],
+                    "services": reservation_data["services"],
                     "selected_staff": reservation_data.get("selected_staff", ""),
                     "assigned_staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
                     "staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
-                    "duration": service_info_for_confirm.get("duration", 60),
-                    "price": service_info_for_confirm.get("price", 0),
+                    "duration": reservation_data["total_duration"],
+                    "price": reservation_data["total_price"],
                 }
 
                 sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
