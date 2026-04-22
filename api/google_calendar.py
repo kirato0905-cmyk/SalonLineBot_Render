@@ -660,12 +660,16 @@ class GoogleCalendarHelper:
         self,
         start_date: datetime,
         end_date: datetime,
-        service_id: str = None,
+        service_ids: Optional[List[str]] = None,
         exclude_reservation_id: str = None,
     ) -> List[Dict[str, Any]]:
         slots_map: Dict[str, Dict[str, Any]] = {}
         current_date = start_date.date()
         end_date_only = end_date.date()
+
+        normalized_service_ids = sorted(set(
+            str(sid).strip() for sid in (service_ids or []) if str(sid).strip()
+        ))
 
         while current_date <= end_date_only:
             date_str = current_date.strftime("%Y-%m-%d")
@@ -679,8 +683,7 @@ class GoogleCalendarHelper:
                 if not staff_name:
                     continue
 
-                service_ids = staff_data.get("service_ids")
-                if isinstance(service_ids, list) and service_ids and service_id and service_id not in service_ids:
+                if not self._supports_all_services(staff_data, normalized_service_ids):
                     continue
 
                 try:
@@ -688,7 +691,7 @@ class GoogleCalendarHelper:
                         date_str=date_str,
                         exclude_reservation_id=exclude_reservation_id,
                         staff_name=staff_name,
-                        service_id=service_id,
+                        service_ids=normalized_service_ids,
                     )
                 except Exception:
                     continue
@@ -715,15 +718,24 @@ class GoogleCalendarHelper:
         end_date: datetime,
         staff_name: str = None,
         service_id: str = None,
+        service_ids: Optional[List[str]] = None,
         exclude_reservation_id: str = None,
     ) -> list:
         self._reload_config_data()
+
+        normalized_service_ids = sorted(set(
+            str(sid).strip() for sid in (service_ids or []) if str(sid).strip()
+        ))
+        if not normalized_service_ids and service_id:
+            normalized_service_ids = [str(service_id).strip()]
+
+        service_cache_key = ",".join(normalized_service_ids) if normalized_service_ids else "__NO_SERVICE__"
 
         cache_key = "|".join([
             start_date.strftime("%Y-%m-%d %H:%M:%S"),
             end_date.strftime("%Y-%m-%d %H:%M:%S"),
             staff_name or "__NO_STAFF__",
-            ",".join(service_ids or []) or service_id or "__NO_SERVICE__",
+            service_cache_key,
             exclude_reservation_id or "__NO_EXCLUDE__",
         ])
         if cache_key in self._slots_cache:
@@ -763,7 +775,7 @@ class GoogleCalendarHelper:
         result = self._generate_slots_for_no_preference(
             start_date=start_date,
             end_date=end_date,
-            service_id=service_id,
+            service_ids=normalized_service_ids,
             exclude_reservation_id=exclude_reservation_id,
         )
         self._slots_cache[cache_key] = list(result)
@@ -775,10 +787,19 @@ class GoogleCalendarHelper:
         exclude_reservation_id: str = None,
         staff_name: str = None,
         service_id: str = None,
+        service_ids: Optional[List[str]] = None,
     ) -> List[Dict]:
         self._reload_config_data()
 
-        cache_key = f"MOD|{date_str}|{staff_name or '__NO_STAFF__'}|{service_id or '__NO_SERVICE__'}|{exclude_reservation_id or '__NO_EXCLUDE__'}"
+        normalized_service_ids = sorted(set(
+            str(sid).strip() for sid in (service_ids or []) if str(sid).strip()
+        ))
+        if not normalized_service_ids and service_id:
+            normalized_service_ids = [str(service_id).strip()]
+
+        service_cache_key = ",".join(normalized_service_ids) if normalized_service_ids else "__NO_SERVICE__"
+
+        cache_key = f"MOD|{date_str}|{staff_name or '__NO_STAFF__'}|{service_cache_key}|{exclude_reservation_id or '__NO_EXCLUDE__'}"
         if cache_key in self._slots_cache:
             return list(self._slots_cache[cache_key])
 
@@ -787,7 +808,7 @@ class GoogleCalendarHelper:
             result = self._generate_slots_for_no_preference(
                 start_date=target_date,
                 end_date=target_date,
-                service_id=service_id,
+                service_ids=normalized_service_ids,
                 exclude_reservation_id=exclude_reservation_id,
             )
             self._slots_cache[cache_key] = list(result)
