@@ -214,7 +214,7 @@ def handle_message(event: MessageEvent):
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
 
         # Service menu
-        service_menu_keywords = ["サービス一覧", "サービスメニュー", "メニューを見る", "メニュー"]
+        service_menu_keywords = ["サービス一覧", "サービスメニュー", "メニュー"]
         if message_text in service_menu_keywords:
             try:
                 send_service_menu(event.reply_token, configuration)
