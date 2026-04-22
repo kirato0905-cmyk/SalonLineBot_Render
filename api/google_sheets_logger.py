@@ -45,11 +45,8 @@ class GoogleSheetsLogger:
         "Display Name",
         "Phone Number",
         "Status",
-        "Notes",
         "Consented",
         "Consent Date",
-        "First Seen",
-        "Last Seen"
     ]
 
     _instance = None
@@ -148,7 +145,7 @@ class GoogleSheetsLogger:
             self.users_worksheet = self._get_or_create_worksheet(
                 title="Users",
                 rows=1000,
-                cols=10,
+                cols=7,
                 headers=self.USER_HEADERS
             )
             print("Google Sheets logger initialized successfully")
@@ -220,7 +217,7 @@ class GoogleSheetsLogger:
         self.users_worksheet = self._get_or_create_worksheet(
             title="Users",
             rows=1000,
-            cols=10,
+            cols=7,
             headers=self.USER_HEADERS
         )
         return self.users_worksheet
@@ -448,11 +445,8 @@ class GoogleSheetsLogger:
                 display_name,
                 phone_number,
                 "Active",
-                "Added via LINE Bot",
                 "No",
                 "",
-                timestamp,
-                timestamp,
             ]
             users_worksheet.append_row(user_data)
             self._invalidate_cache("users_records")
@@ -472,7 +466,7 @@ class GoogleSheetsLogger:
             logging.error(f"Error getting user by ID {user_id}: {e}")
             return None
 
-    def update_user_status(self, user_id: str, status: str, notes: str = "") -> bool:
+    def update_user_status(self, user_id: str, status: str) -> bool:
         users_worksheet = self._get_users_worksheet()
         if not users_worksheet:
             return False
@@ -481,8 +475,6 @@ class GoogleSheetsLogger:
             for i, record in enumerate(records, start=2):
                 if record.get("User ID") == user_id:
                     users_worksheet.update_cell(i, 5, status)
-                    if notes:
-                        users_worksheet.update_cell(i, 6, notes)
                     self._invalidate_cache("users_records")
                     print(f"Updated user {user_id} status to: {status}")
                     return True
@@ -510,8 +502,8 @@ class GoogleSheetsLogger:
             records = self._get_users_records()
             for i, record in enumerate(records, start=2):
                 if record.get("User ID") == user_id:
-                    users_worksheet.update_cell(i, 7, "Yes" if consented else "No")
-                    users_worksheet.update_cell(i, 8, self._get_tokyo_timestamp() if consented else "")
+                    users_worksheet.update_cell(i, 6, "Yes" if consented else "No")
+                    users_worksheet.update_cell(i, 7, self._get_tokyo_timestamp() if consented else "")
                     self._invalidate_cache("users_records")
                     return True
             return False
@@ -521,31 +513,23 @@ class GoogleSheetsLogger:
 
     def mark_user_seen(self, user_id: str) -> bool:
         """
-        Users シートの Last Seen を更新する。
-        user_session_manager などから呼ばれる想定。
+        互換性維持用。
+        Users シートから Last Seen を削除したため no-op。
         """
-        users_worksheet = self._get_users_worksheet()
-        if not users_worksheet:
-            logging.error("Users worksheet not available. Cannot mark user seen.")
-            return False
+        return True
 
+    def mark_user_consented(self, user_id: str) -> bool:
+        return self.set_user_consent(user_id, True)
+
+    def revoke_user_consent(self, user_id: str) -> bool:
+        return self.set_user_consent(user_id, False)
+
+    def is_new_user(self, user_id: str) -> bool:
         try:
-            records = self._get_users_records()
-            timestamp = self._get_tokyo_timestamp()
-
-            for i, record in enumerate(records, start=2):
-                if record.get("User ID") == user_id:
-                    # Last Seen 列
-                    users_worksheet.update_cell(i, 10, timestamp)
-                    self._invalidate_cache("users_records")
-                    print(f"Updated Last Seen for user {user_id}: {timestamp}")
-                    return True
-
-            logging.warning(f"User {user_id} not found for mark_user_seen")
-            return False
+            return self.get_user_by_id(user_id) is None
         except Exception as e:
-            logging.error(f"Failed to mark user seen for {user_id}: {e}")
-            return False
+            logging.error(f"Error checking new user for {user_id}: {e}")
+            return True
 
 
 _sheets_logger_instance = None
@@ -556,4 +540,3 @@ def get_sheets_logger() -> GoogleSheetsLogger:
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
     return _sheets_logger_instance
-
