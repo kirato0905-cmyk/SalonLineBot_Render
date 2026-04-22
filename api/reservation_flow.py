@@ -1420,7 +1420,7 @@ class ReservationFlow:
         cache_key = self._make_available_slots_cache_key(
             selected_date=selected_date,
             staff_name=staff_name,
-            current_service_id=current_service_id,
+            current_service_id=service_cache_key,
             exclude_reservation_id=exclude_reservation_id,
         )
 
@@ -1428,12 +1428,16 @@ class ReservationFlow:
             cached_slots = runtime_cache["available_slots"][cache_key]
             return [dict(slot) for slot in cached_slots]
 
+        current_service_ids = self._get_current_service_ids(user_id) if user_id else []
+        service_cache_key = ",".join(sorted(current_service_ids)) if current_service_ids else current_service_id
+
         if staff_name and not self._is_no_preference_staff(staff_name):
             staff_slots = self.google_calendar.get_available_slots_for_modification(
-                selected_date,
-                exclude_reservation_id,
-                staff_name,
-                current_service_id,
+                date_str=selected_date,
+                exclude_reservation_id=exclude_reservation_id,
+                staff_name=staff_name,
+                service_id=current_service_id,
+                service_ids=current_service_ids,
             )
 
             if original_reservation and original_reservation.get("date") == selected_date:
@@ -1467,11 +1471,12 @@ class ReservationFlow:
         end_date = start_date
 
         date_slots = self.google_calendar.get_available_slots(
-            start_date,
-            end_date,
-            None,
-            current_service_id,
-            exclude_reservation_id,
+            start_date=start_date,
+            end_date=end_date,
+            staff_name=None,
+            service_id=current_service_id,
+            service_ids=current_service_ids,
+            exclude_reservation_id=exclude_reservation_id,
         )
         date_slots = [slot for slot in date_slots if slot["date"] == selected_date]
 
@@ -2658,9 +2663,7 @@ class ReservationFlow:
         if not is_valid_time:
             return time_error_message
 
-        sid = self._get_current_service_id(user_id)
-        service_info = self._get_service_by_id(sid) if sid else {}
-        required_duration = service_info.get("duration", 60)
+        required_duration = self._get_cart_total_duration(user_id) or 60
 
         end_time = self._calculate_optimal_end_time(start_time, required_duration)
 
