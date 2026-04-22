@@ -129,7 +129,9 @@ class LineNotifier:
         calendar_url = self._get_calendar_url(staff_name)
 
         service_name = reservation_data.get("service", "")
-        price = self._get_service_price(service_name)
+        price = int(reservation_data.get("total_price", 0) or 0)
+        if price <= 0:
+            price = self._get_service_price(service_name)
 
         message = f"👤{client_name}\n"
         message += f"📅{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
