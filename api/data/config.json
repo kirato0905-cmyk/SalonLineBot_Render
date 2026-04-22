@@ -138,440 +138,475 @@
       "recommend_count": 2
     }
   },
+  "service_categories": [
+    {
+      "id": "cut",
+      "name": "カット系",
+      "display_order": 1
+    },
+    {
+      "id": "color",
+      "name": "カラー系",
+      "display_order": 2
+    },
+    {
+      "id": "perm",
+      "name": "パーマ系",
+      "display_order": 3
+    },
+    {
+      "id": "straight",
+      "name": "縮毛矯正系",
+      "display_order": 4
+    },
+    {
+      "id": "treatment",
+      "name": "トリートメント系",
+      "display_order": 5
+    },
+    {
+      "id": "spa",
+      "name": "ヘッドスパ系",
+      "display_order": 6
+    },
+    {
+      "id": "other",
+      "name": "その他メニュー",
+      "display_order": 7
+    }
+  ],
+  "featured_sets": [
+    {
+      "id": "set_cut_color_treatment",
+      "name": "カット＋カラー＋トリートメント",
+      "price": 10000,
+      "duration": 150,
+      "services": [
+        "cut_basic",
+        "color_basic",
+        "treatment_repair"
+      ],
+      "display_order": 1,
+      "is_active": true,
+      "description": "迷ったらこれ。定番の人気セットです。"
+    },
+    {
+      "id": "set_cut_color",
+      "name": "カット＋カラー",
+      "price": 7000,
+      "duration": 120,
+      "services": [
+        "cut_basic",
+        "color_basic"
+      ],
+      "display_order": 2,
+      "is_active": true,
+      "description": "まとめて整えたい方におすすめの人気セットです。"
+    }
+  ],
   "services": {
     "service_1": {
       "id": "cut_basic",
       "category": "cut",
       "name": "カット",
-      "description": "カットメニューです。",
       "price": 3000,
       "duration": 60,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "カットで予約する",
-      "order": 1
+      "description": "カットメニューです。",
+      "cta_label": "カットを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_2": {
       "id": "cut_bangs",
       "category": "cut",
       "name": "前髪カット",
-      "description": "前髪カットメニューです。",
       "price": 1000,
       "duration": 15,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "前髪カットで予約する",
-      "order": 2
+      "description": "前髪カットメニューです。",
+      "cta_label": "前髪カットを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_3": {
       "id": "cut_maintenance",
       "category": "cut",
       "name": "メンテナンスカット",
-      "description": "メンテナンスカットメニューです。",
       "price": 2000,
       "duration": 30,
       "is_active": true,
       "display_order": 3,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "メンテナンスカットで予約する",
-      "order": 3
+      "description": "メンテナンスカットメニューです。",
+      "cta_label": "メンテナンスカットを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_4": {
       "id": "cut_school",
       "category": "cut",
       "name": "スクールカット",
-      "description": "スクールカットメニューです。",
       "price": 2500,
       "duration": 45,
       "is_active": true,
       "display_order": 4,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "スクールカットで予約する",
-      "order": 4
+      "description": "スクールカットメニューです。",
+      "cta_label": "スクールカットを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_5": {
       "id": "cut_kids",
       "category": "cut",
       "name": "キッズカット",
-      "description": "キッズカットメニューです。",
       "price": 2000,
       "duration": 30,
       "is_active": true,
       "display_order": 5,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "キッズカットで予約する",
-      "order": 5
+      "description": "キッズカットメニューです。",
+      "cta_label": "キッズカットを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_6": {
       "id": "color_basic",
       "category": "color",
       "name": "カラー",
-      "description": "カラーメニューです。",
       "price": 4000,
       "duration": 60,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "カラーで予約する",
-      "order": 6
+      "description": "カラーメニューです。",
+      "cta_label": "カラーを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_7": {
       "id": "color_retouch",
       "category": "color",
       "name": "リタッチ",
-      "description": "リタッチメニューです。",
       "price": 3500,
       "duration": 60,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "リタッチで予約する",
-      "order": 7
+      "description": "リタッチメニューです。",
+      "cta_label": "リタッチを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_8": {
       "id": "color_bleach",
       "category": "color",
       "name": "ブリーチ",
-      "description": "ブリーチメニューです。",
-      "price": 7000,
+      "price": 8000,
       "duration": 120,
       "is_active": true,
       "display_order": 3,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "ブリーチで予約する",
-      "order": 8
+      "description": "ブリーチメニューです。",
+      "cta_label": "ブリーチを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_9": {
       "id": "color_care_bleach",
       "category": "color",
       "name": "ケアブリーチ",
-      "description": "ケアブリーチメニューです。",
-      "price": 9000,
+      "price": 10000,
       "duration": 150,
       "is_active": true,
       "display_order": 4,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "ケアブリーチで予約する",
-      "order": 9
+      "description": "ケアブリーチメニューです。",
+      "cta_label": "ケアブリーチを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_10": {
       "id": "color_baleyage",
       "category": "color",
       "name": "バレイヤージュ",
-      "description": "バレイヤージュメニューです。",
       "price": 12000,
       "duration": 180,
       "is_active": true,
       "display_order": 5,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "バレイヤージュで予約する",
-      "order": 10
+      "description": "バレイヤージュメニューです。",
+      "cta_label": "バレイヤージュを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_11": {
       "id": "perm_standard",
       "category": "perm",
       "name": "スタンダートパーマ",
-      "description": "スタンダートパーマメニューです。",
       "price": 7000,
       "duration": 120,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "スタンダートパーマで予約する",
-      "order": 11
+      "description": "スタンダートパーマメニューです。",
+      "cta_label": "スタンダートパーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_12": {
       "id": "perm_volume_down",
       "category": "perm",
       "name": "ボリュームダウンパーマ",
-      "description": "ボリュームダウンパーマメニューです。",
-      "price": 6500,
-      "duration": 90,
+      "price": 8000,
+      "duration": 120,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "ボリュームダウンパーマで予約する",
-      "order": 12
+      "description": "ボリュームダウンパーマメニューです。",
+      "cta_label": "ボリュームダウンパーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_13": {
       "id": "perm_acid",
       "category": "perm",
       "name": "酸性パーマ",
-      "description": "酸性パーマメニューです。",
       "price": 9000,
       "duration": 150,
       "is_active": true,
       "display_order": 3,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "酸性パーマで予約する",
-      "order": 13
+      "description": "酸性パーマメニューです。",
+      "cta_label": "酸性パーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_14": {
       "id": "perm_ridge",
       "category": "perm",
       "name": "リッジパーマ",
-      "description": "リッジパーマメニューです。",
-      "price": 8000,
-      "duration": 120,
+      "price": 8500,
+      "duration": 150,
       "is_active": true,
       "display_order": 4,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "リッジパーマで予約する",
-      "order": 14
+      "description": "リッジパーマメニューです。",
+      "cta_label": "リッジパーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_15": {
       "id": "perm_partial",
       "category": "perm",
       "name": "部分パーマ",
-      "description": "部分パーマメニューです。",
-      "price": 3500,
-      "duration": 45,
+      "price": 4000,
+      "duration": 60,
       "is_active": true,
       "display_order": 5,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "部分パーマで予約する",
-      "order": 15
+      "description": "部分パーマメニューです。",
+      "cta_label": "部分パーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_16": {
       "id": "straight_basic",
       "category": "straight",
       "name": "ストレートパーマ",
-      "description": "ストレートパーマメニューです。",
-      "price": 9000,
-      "duration": 150,
+      "price": 12000,
+      "duration": 180,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "ストレートパーマで予約する",
-      "order": 16
+      "description": "ストレートパーマメニューです。",
+      "cta_label": "ストレートパーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_17": {
       "id": "straight_acid",
       "category": "straight",
       "name": "酸性ストレートパーマ",
-      "description": "酸性ストレートパーマメニューです。",
-      "price": 13000,
-      "duration": 180,
+      "price": 15000,
+      "duration": 210,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "酸性ストレートパーマで予約する",
-      "order": 17
+      "description": "酸性ストレートパーマメニューです。",
+      "cta_label": "酸性ストレートパーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_18": {
       "id": "straight_partial",
       "category": "straight",
       "name": "部分ストレートパーマ",
-      "description": "部分ストレートパーマメニューです。",
-      "price": 4500,
-      "duration": 60,
+      "price": 6000,
+      "duration": 90,
       "is_active": true,
       "display_order": 3,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "部分ストレートパーマで予約する",
-      "order": 18
+      "description": "部分ストレートパーマメニューです。",
+      "cta_label": "部分ストレートパーマを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_19": {
       "id": "treatment_quick",
       "category": "treatment",
       "name": "クイックトリートメント",
-      "description": "クイックトリートメントメニューです。",
       "price": 2000,
       "duration": 15,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "クイックトリートメントで予約する",
-      "order": 19
+      "description": "クイックトリートメントメニューです。",
+      "cta_label": "クイックトリートメントを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_20": {
       "id": "treatment_repair",
       "category": "treatment",
       "name": "内部補修トリートメント",
-      "description": "内部補修トリートメントメニューです。",
       "price": 3000,
       "duration": 30,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "内部補修トリートメントで予約する",
-      "order": 20
+      "description": "内部補修トリートメントメニューです。",
+      "cta_label": "内部補修トリートメントを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_21": {
       "id": "treatment_system",
       "category": "treatment",
       "name": "システムトリートメント",
-      "description": "システムトリートメントメニューです。",
       "price": 5000,
       "duration": 45,
       "is_active": true,
       "display_order": 3,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "システムトリートメントで予約する",
-      "order": 21
+      "description": "システムトリートメントメニューです。",
+      "cta_label": "システムトリートメントを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_22": {
       "id": "treatment_acid_heat",
       "category": "treatment",
       "name": "酸熱トリートメント",
-      "description": "酸熱トリートメントメニューです。",
-      "price": 8000,
+      "price": 9000,
       "duration": 90,
       "is_active": true,
       "display_order": 4,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "酸熱トリートメントで予約する",
-      "order": 22
+      "description": "酸熱トリートメントメニューです。",
+      "cta_label": "酸熱トリートメントを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_23": {
-      "id": "spa_carbonic",
+      "id": "spa_carbonated",
       "category": "spa",
       "name": "炭酸スパ",
-      "description": "炭酸スパメニューです。",
-      "price": 2500,
-      "duration": 20,
+      "price": 3000,
+      "duration": 30,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "炭酸スパで予約する",
-      "order": 23
+      "description": "炭酸スパメニューです。",
+      "cta_label": "炭酸スパを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_24": {
       "id": "spa_aroma",
       "category": "spa",
       "name": "アロマスパ",
-      "description": "アロマスパメニューです。",
-      "price": 3500,
-      "duration": 30,
+      "price": 4000,
+      "duration": 45,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "アロマスパで予約する",
-      "order": 24
+      "description": "アロマスパメニューです。",
+      "cta_label": "アロマスパを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_25": {
       "id": "spa_lifting",
       "category": "spa",
       "name": "リフティングスパ",
-      "description": "リフティングスパメニューです。",
-      "price": 4000,
-      "duration": 40,
-      "is_active": true,
-      "display_order": 3,
-      "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "リフティングスパで予約する",
-      "order": 25
-    },
-    "service_26": {
-      "id": "spa_beauty",
-      "category": "spa",
-      "name": "美髪スパ",
-      "description": "美髪スパメニューです。",
       "price": 5000,
       "duration": 45,
       "is_active": true,
+      "display_order": 3,
+      "can_combine": true,
+      "description": "リフティングスパメニューです。",
+      "cta_label": "リフティングスパを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
+    },
+    "service_26": {
+      "id": "spa_beauty_hair",
+      "category": "spa",
+      "name": "美髪スパ",
+      "price": 6000,
+      "duration": 60,
+      "is_active": true,
       "display_order": 4,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "美髪スパで予約する",
-      "order": 26
+      "description": "美髪スパメニューです。",
+      "cta_label": "美髪スパを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_27": {
       "id": "other_beauty_shampoo",
       "category": "other",
       "name": "美髪シャンプー",
-      "description": "美髪シャンプーメニューです。",
-      "price": 1500,
+      "price": 1000,
       "duration": 15,
       "is_active": true,
       "display_order": 1,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "美髪シャンプーで予約する",
-      "order": 27
+      "description": "美髪シャンプーメニューです。",
+      "cta_label": "美髪シャンプーを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_28": {
       "id": "other_quick_blow",
       "category": "other",
       "name": "クイックブロー",
-      "description": "クイックブローメニューです。",
       "price": 1500,
-      "duration": 15,
+      "duration": 20,
       "is_active": true,
       "display_order": 2,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "クイックブローで予約する",
-      "order": 28
+      "description": "クイックブローメニューです。",
+      "cta_label": "クイックブローを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_29": {
       "id": "other_natural_blow",
       "category": "other",
       "name": "ナチュラルブロー",
-      "description": "ナチュラルブローメニューです。",
-      "price": 2500,
+      "price": 2000,
       "duration": 30,
       "is_active": true,
       "display_order": 3,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "ナチュラルブローで予約する",
-      "order": 29
+      "description": "ナチュラルブローメニューです。",
+      "cta_label": "ナチュラルブローを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_30": {
       "id": "other_design_blow",
       "category": "other",
       "name": "デザインブロー",
-      "description": "デザインブローメニューです。",
-      "price": 3500,
+      "price": 3000,
       "duration": 45,
       "is_active": true,
       "display_order": 4,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "デザインブローで予約する",
-      "order": 30
+      "description": "デザインブローメニューです。",
+      "cta_label": "デザインブローを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     },
     "service_31": {
       "id": "other_fix",
       "category": "other",
       "name": "お直し",
-      "description": "お直しメニューです。",
-      "price": 2000,
+      "price": 1000,
       "duration": 20,
       "is_active": true,
       "display_order": 5,
       "can_combine": true,
-      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png",
-      "cta_label": "お直しで予約する",
-      "order": 31
+      "description": "お直しメニューです。",
+      "cta_label": "お直しを追加",
+      "image_url": "https://img.icons8.com/?size=48&id=12245&format=png"
     }
   },
   "staff": {
@@ -776,69 +811,5 @@
       },
       "attendance_shifts": {}
     }
-  },
-  "service_categories": [
-    {
-      "id": "cut",
-      "name": "カット",
-      "display_order": 1
-    },
-    {
-      "id": "color",
-      "name": "カラー",
-      "display_order": 2
-    },
-    {
-      "id": "perm",
-      "name": "パーマ",
-      "display_order": 3
-    },
-    {
-      "id": "straight",
-      "name": "ストレート",
-      "display_order": 4
-    },
-    {
-      "id": "treatment",
-      "name": "トリートメント",
-      "display_order": 5
-    },
-    {
-      "id": "spa",
-      "name": "ヘッドスパ",
-      "display_order": 6
-    },
-    {
-      "id": "other",
-      "name": "セット",
-      "display_order": 7
-    }
-  ],
-  "featured_sets": [
-    {
-      "id": "set_cut_color_treatment",
-      "name": "カット＋カラー＋トリートメント",
-      "price": 10000,
-      "duration": 150,
-      "services": [
-        "cut_basic",
-        "color_basic",
-        "treatment_repair"
-      ],
-      "display_order": 1,
-      "is_active": true
-    },
-    {
-      "id": "set_cut_color",
-      "name": "カット＋カラー",
-      "price": 7000,
-      "duration": 120,
-      "services": [
-        "cut_basic",
-        "color_basic"
-      ],
-      "display_order": 2,
-      "is_active": true
-    }
-  ]
+  }
 }
