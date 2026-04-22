@@ -2885,110 +2885,242 @@ class ReservationFlow:
                 "message": "空き状況の最終確認中にエラーが発生しました。もう一度お試しください。"
             }
 
-    def _handle_confirmation(self, user_id: str, message: str) -> str:
-        yes_keywords = self.confirmation_keywords.get("yes", [])
-        no_keywords = self.confirmation_keywords.get("no", [])
-        message_normalized = self._normalize_input_text(message)
+    def _execute_new_reservation(self, user_id: str) -> str:
+        self._sync_cart_to_reservation_fields(user_id)
+        reservation_data = self.user_states[user_id]["data"].copy()
 
-        if self._match_keyword_group(message_normalized, yes_keywords):
-            self._sync_cart_to_reservation_fields(user_id)
-            reservation_data = self.user_states[user_id]["data"].copy()
-
-            if "staff" not in reservation_data:
-                logging.error(
-                    f"[_handle_confirmation] ERROR: Staff not found in reservation_data! Data: {reservation_data}"
-                )
-                return "申し訳ございませんがエラーが発生しました。「やめる」とお送りして、もう一度最初からやり直してください。"
-
-            services = reservation_data.get("services") or reservation_data.get("cart") or []
-            if not services:
-                return "メニューが選択されていません。ご希望のメニューをお選びください👇"
-
-            reservation_data["services"] = [dict(item) for item in services]
-            reservation_data["service"] = self._format_service_summary(reservation_data["services"])
-            reservation_data["total_duration"] = int(reservation_data.get("total_duration", 0) or 0) or sum(
-                int(item.get("duration", 0) or 0) for item in reservation_data["services"]
+        if "staff" not in reservation_data:
+            logging.error(
+                f"[_execute_new_reservation] ERROR: Staff not found in reservation_data! Data: {reservation_data}"
             )
-            reservation_data["total_price"] = int(reservation_data.get("total_price", 0) or 0) or sum(
-                int(item.get("price", 0) or 0) for item in reservation_data["services"]
-            )
-            reservation_data["service_id"] = reservation_data["services"][0].get("service_id") if reservation_data["services"] else None
+            return "申し訳ございませんがエラーが発生しました。「やめる」とお送りして、もう一度最初からやり直してください。"
 
-            availability_check = self._check_final_availability(reservation_data)
-            if not availability_check["available"]:
-                del self.user_states[user_id]
-                return f"""❌ 申し訳ございませんが、選択された時間帯は既に他のお客様にご予約いただいておりました。
+        services = reservation_data.get("services") or reservation_data.get("cart") or []
+        if not services:
+            return "メニューが選択されていません。ご希望のメニューをお選びください👇"
+
+        reservation_data["services"] = [dict(item) for item in services]
+        reservation_data["service"] = self._format_service_summary(reservation_data["services"])
+        reservation_data["total_duration"] = int(reservation_data.get("total_duration", 0) or 0) or sum(
+            int(item.get("duration", 0) or 0) for item in reservation_data["services"]
+        )
+        reservation_data["total_price"] = int(reservation_data.get("total_price", 0) or 0) or sum(
+            int(item.get("price", 0) or 0) for item in reservation_data["services"]
+        )
+        reservation_data["service_id"] = reservation_data["services"][0].get("service_id") if reservation_data["services"] else None
+
+        availability_check = self._check_final_availability(reservation_data)
+        if not availability_check["available"]:
+            del self.user_states[user_id]
+            return f"""❌ 申し訳ございませんが、選択された時間帯は既に他のお客様にご予約いただいておりました。
 
 {availability_check["message"]}
 
 別の時間帯でご予約いただけますでしょうか？
 「予約したい」とお送りください。"""
 
-            resolved_staff = availability_check.get("resolved_staff")
-            if resolved_staff:
-                reservation_data["assigned_staff"] = resolved_staff
-                reservation_data["staff"] = resolved_staff
+        resolved_staff = availability_check.get("resolved_staff")
+        if resolved_staff:
+            reservation_data["assigned_staff"] = resolved_staff
+            reservation_data["staff"] = resolved_staff
 
-            if self._is_no_preference_staff(reservation_data.get("selected_staff")) or reservation_data.get("selected_staff") == "free":
-                reservation_data["selected_staff"] = "free"
-            else:
-                reservation_data["selected_staff"] = reservation_data.get("selected_staff") or reservation_data["staff"]
+        if self._is_no_preference_staff(reservation_data.get("selected_staff")) or reservation_data.get("selected_staff") == "free":
+            reservation_data["selected_staff"] = "free"
+        else:
+            reservation_data["selected_staff"] = reservation_data.get("selected_staff") or reservation_data["staff"]
 
-            reservation_id = self.google_calendar.generate_reservation_id(reservation_data["date"])
-            reservation_data["reservation_id"] = reservation_id
+        reservation_id = self.google_calendar.generate_reservation_id(reservation_data["date"])
+        reservation_data["reservation_id"] = reservation_id
 
-            client_name = self._get_line_display_name(user_id)
+        client_name = self._get_line_display_name(user_id)
 
-            calendar_success = self.google_calendar.create_reservation_event(
-                reservation_data,
-                client_name,
-            )
-            if not calendar_success:
-                return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
+        calendar_success = self.google_calendar.create_reservation_event(
+            reservation_data,
+            client_name,
+        )
+        if not calendar_success:
+            return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
 
-            try:
-                sheets_logger = self.sheets_logger
+        try:
+            sheets_logger = self.sheets_logger
 
-                sheet_reservation_data = {
-                    "reservation_id": reservation_id,
-                    "user_id": user_id,
-                    "client_name": client_name,
-                    "date": reservation_data["date"],
-                    "start_time": reservation_data.get("start_time", reservation_data.get("time", "")),
-                    "end_time": reservation_data.get("end_time", ""),
-                    "service": reservation_data["service"],
-                    "services": reservation_data["services"],
-                    "selected_staff": reservation_data.get("selected_staff", ""),
-                    "assigned_staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
-                    "staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
-                    "duration": reservation_data["total_duration"],
-                    "price": reservation_data["total_price"],
-                }
+            sheet_reservation_data = {
+                "reservation_id": reservation_id,
+                "user_id": user_id,
+                "client_name": client_name,
+                "date": reservation_data["date"],
+                "start_time": reservation_data.get("start_time", reservation_data.get("time", "")),
+                "end_time": reservation_data.get("end_time", ""),
+                "service": reservation_data["service"],
+                "services": reservation_data["services"],
+                "selected_staff": reservation_data.get("selected_staff", ""),
+                "assigned_staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
+                "staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
+                "duration": reservation_data["total_duration"],
+                "price": reservation_data["total_price"],
+            }
 
-                sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
-                if not sheets_success:
-                    logging.warning("Failed to save reservation to sheets, but calendar creation succeeded")
-            except Exception as e:
-                logging.error(f"Failed to save reservation to sheets: {e}", exc_info=True)
+            sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
+            if not sheets_success:
+                logging.warning("Failed to save reservation to sheets, but calendar creation succeeded")
+        except Exception as e:
+            logging.error(f"Failed to save reservation to sheets: {e}", exc_info=True)
 
-            try:
-                from api.notification_manager import send_reservation_confirmation_notification
-                send_reservation_confirmation_notification(reservation_data, client_name)
-            except Exception as e:
-                logging.error(f"Failed to send reservation notification: {e}", exc_info=True)
+        try:
+            from api.notification_manager import send_reservation_confirmation_notification
+            send_reservation_confirmation_notification(reservation_data, client_name)
+        except Exception as e:
+            logging.error(f"Failed to send reservation notification: {e}", exc_info=True)
 
-            assigned_staff = reservation_data.get("assigned_staff") or reservation_data["staff"]
+        assigned_staff = reservation_data.get("assigned_staff") or reservation_data["staff"]
 
-            if user_id in self.user_states:
-                del self.user_states[user_id]
+        if user_id in self.user_states:
+            del self.user_states[user_id]
 
-            return f"""ご予約が確定しました😊
+        return f"""ご予約が確定しました😊
 
 日時：{reservation_data['date']} {reservation_data.get('start_time', reservation_data.get('time', ''))}~{reservation_data.get('end_time', '')}
 メニュー：{reservation_data['service']}
 担当スタッフ：{assigned_staff}
 
 ご来店を心よりお待ちしております。"""
+
+    def _execute_reservation_modification(self, user_id: str) -> str:
+        try:
+            self._sync_cart_to_reservation_fields(user_id)
+            state = self.user_states.get(user_id, {})
+            new_data = dict(state.get("data", {}))
+            original_reservation = state.get("original_reservation")
+
+            if not original_reservation:
+                logging.error("[_execute_reservation_modification] original_reservation not found")
+                return "予約変更元の情報が見つかりません。もう一度お試しください。"
+
+            original_reservation_id = original_reservation.get("reservation_id")
+            if not original_reservation_id:
+                logging.error("[_execute_reservation_modification] original reservation_id not found")
+                return "元の予約IDが見つかりません。もう一度お試しください。"
+
+            if "staff" not in new_data:
+                logging.error(
+                    f"[_execute_reservation_modification] ERROR: Staff not found in new_data! Data: {new_data}"
+                )
+                return "申し訳ございませんがエラーが発生しました。「やめる」とお送りして、もう一度最初からやり直してください。"
+
+            services = new_data.get("services") or new_data.get("cart") or []
+            if not services:
+                return "メニューが選択されていません。ご希望のメニューをお選びください👇"
+
+            new_data["services"] = [dict(item) for item in services]
+            new_data["service"] = self._format_service_summary(new_data["services"])
+            new_data["total_duration"] = int(new_data.get("total_duration", 0) or 0) or sum(
+                int(item.get("duration", 0) or 0) for item in new_data["services"]
+            )
+            new_data["total_price"] = int(new_data.get("total_price", 0) or 0) or sum(
+                int(item.get("price", 0) or 0) for item in new_data["services"]
+            )
+            new_data["service_id"] = new_data["services"][0].get("service_id") if new_data["services"] else None
+            new_data["reservation_id"] = original_reservation_id
+            new_data["user_id"] = user_id
+
+            availability_check = self._check_final_availability(new_data)
+            if not availability_check["available"]:
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return f"""❌ 申し訳ございませんが、選択された時間帯は既に他のお客様にご予約いただいておりました。
+
+{availability_check["message"]}
+
+別の時間帯で予約変更をお願いいたします。"""
+
+            resolved_staff = availability_check.get("resolved_staff")
+            if resolved_staff:
+                new_data["assigned_staff"] = resolved_staff
+                new_data["staff"] = resolved_staff
+
+            if self._is_no_preference_staff(new_data.get("selected_staff")) or new_data.get("selected_staff") == "free":
+                new_data["selected_staff"] = "free"
+            else:
+                new_data["selected_staff"] = new_data.get("selected_staff") or new_data["staff"]
+
+            client_name = self._get_line_display_name(user_id)
+
+            old_staff_name = original_reservation.get("staff")
+            cancel_success = self.google_calendar.cancel_reservation_by_id(original_reservation_id, old_staff_name)
+            if not cancel_success:
+                logging.error(
+                    f"[_execute_reservation_modification] Failed to cancel original reservation in calendar: {original_reservation_id}"
+                )
+                return "申し訳ございません。元の予約の更新処理に失敗しました。時間をおいてもう一度お試しください。"
+
+            calendar_success = self.google_calendar.create_reservation_event(
+                new_data,
+                client_name,
+            )
+            if not calendar_success:
+                return "申し訳ございません。予約変更中にエラーが発生しました。時間をおいてもう一度お試しください。"
+
+            try:
+                field_updates = {
+                    "Date": new_data["date"],
+                    "Start Time": new_data.get("start_time", new_data.get("time", "")),
+                    "End Time": new_data.get("end_time", ""),
+                    "Service": new_data["service"],
+                    "Selected Staff": new_data.get("selected_staff", ""),
+                    "Assigned Staff": new_data.get("assigned_staff") or new_data["staff"],
+                    "Staff": new_data.get("assigned_staff") or new_data["staff"],
+                    "Duration (min)": new_data["total_duration"],
+                    "Price": new_data["total_price"],
+                    "Status": "Confirmed",
+                }
+                self.sheets_logger.update_reservation_data(original_reservation_id, field_updates)
+            except Exception as e:
+                logging.error(f"Failed to update reservation data in sheets: {e}", exc_info=True)
+
+            try:
+                from api.notification_manager import send_reservation_modification_notification
+                send_reservation_modification_notification(
+                    original_reservation,
+                    {
+                        "reservation_id": original_reservation_id,
+                        "date": new_data["date"],
+                        "start_time": new_data.get("start_time", new_data.get("time", "")),
+                        "end_time": new_data.get("end_time", ""),
+                        "service": new_data["service"],
+                        "staff": new_data.get("assigned_staff") or new_data["staff"],
+                    },
+                    client_name,
+                )
+            except Exception as e:
+                logging.error(f"Failed to send reservation modification notification: {e}", exc_info=True)
+
+            assigned_staff = new_data.get("assigned_staff") or new_data["staff"]
+
+            if user_id in self.user_states:
+                del self.user_states[user_id]
+
+            return f"""予約変更が完了しました😊
+
+日時：{new_data['date']} {new_data.get('start_time', new_data.get('time', ''))}~{new_data.get('end_time', '')}
+メニュー：{new_data['service']}
+担当スタッフ：{assigned_staff}
+
+ご来店を心よりお待ちしております。"""
+
+        except Exception as e:
+            logging.error(f"Reservation modification execution failed: {e}", exc_info=True)
+            return "申し訳ございません。予約変更中にエラーが発生しました。もう一度お試しください。"
+
+    def _handle_confirmation(self, user_id: str, message: str) -> str:
+        yes_keywords = self.confirmation_keywords.get("yes", [])
+        no_keywords = self.confirmation_keywords.get("no", [])
+        message_normalized = self._normalize_input_text(message)
+
+        if self._match_keyword_group(message_normalized, yes_keywords):
+            is_modification = self.user_states.get(user_id, {}).get("is_modification", False)
+            if is_modification:
+                return self._execute_reservation_modification(user_id)
+            return self._execute_new_reservation(user_id)
         elif self._match_keyword_group(message_normalized, no_keywords):
             if user_id in self.user_states:
                 del self.user_states[user_id]
