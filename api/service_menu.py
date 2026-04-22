@@ -386,3 +386,4 @@ def send_single_menu_services(reply_token, configuration, category_id: str) -> N
         logging.error(f"Failed to send single menu services: {e}", exc_info=True)
         raise
 
+
