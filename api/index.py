@@ -275,8 +275,17 @@ def handle_message(event: MessageEvent):
                     logging.error(f"Failed to send error message: {reply_error}", exc_info=True)
                 return
 
-        # FAQ answer by number
-        faq_item = get_faq_by_number(message_text)
+        # FAQ answer by number (予約フロー中は予約側を優先)
+        faq_item = None
+        reservation_intent = None
+        if reservation_flow:
+            try:
+                reservation_intent = reservation_flow.detect_intent(message_text, user_id)
+            except Exception:
+                reservation_intent = None
+
+        if reservation_intent not in {"reservation", "reservation_flow", "modify", "cancel"}:
+            faq_item = get_faq_by_number(message_text)
         if faq_item:
             try:
                 send_faq_answer_by_item(event.reply_token, faq_item, configuration)
@@ -376,8 +385,8 @@ def handle_postback(event: PostbackEvent):
 
     user_name = get_cached_display_name(user_id)
 
-    if action in {"select_service", "select_featured_set"}:
-        service_id = params.get("service_id", [None])[0] or params.get("set_id", [None])[0]
+    if action == "select_service":
+        service_id = params.get("service_id", [None])[0]
         if reservation_flow:
             try:
                 reply_text = reservation_flow.start_reservation_with_service(user_id, service_id)
@@ -386,13 +395,23 @@ def handle_postback(event: PostbackEvent):
                 reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
         else:
             reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
+    elif action == "select_featured_set":
+        set_id = params.get("set_id", [None])[0]
+        if reservation_flow:
+            try:
+                reply_text = reservation_flow.start_reservation_with_featured_set(user_id, set_id)
+            except Exception as e:
+                logging.error(f"Failed to start reservation from featured set postback: {e}", exc_info=True)
+                reply_text = "申し訳ございませんが、セットメニューの処理中にエラーが発生しました。"
+        else:
+            reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
     elif action == "view_single_menu":
         if reservation_flow:
             try:
-                reply_text = reservation_flow.start_reservation_with_service(user_id, "単品メニューを見る")
+                reply_text = reservation_flow.handle_reservation_flow(user_id, "単品メニューを見る")
             except Exception as e:
-                logging.error(f"Failed to open category menu from postback: {e}", exc_info=True)
-                reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
+                logging.error(f"Failed to open single menu categories from postback: {e}", exc_info=True)
+                reply_text = "申し訳ございませんが、メニューカテゴリの表示中にエラーが発生しました。"
         else:
             reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
     else:
