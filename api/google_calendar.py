@@ -1068,11 +1068,17 @@ class GoogleCalendarHelper:
         """
         self._reload_config_data()
 
+        requested_service_ids = [str(sid).strip() for sid in (service_ids or []) if str(sid).strip()]
+        if not requested_service_ids and service_id:
+            requested_service_ids = [str(service_id).strip()]
+        requested_service_ids = sorted(set(requested_service_ids))
+
+        service_cache_key = ",".join(requested_service_ids) if requested_service_ids else "__NO_SERVICE__"
         cache_key = "|".join([
             date_str,
             start_time,
             str(duration_minutes),
-            service_id or "__NO_SERVICE__",
+            service_cache_key,
             exclude_reservation_id or "__NO_EXCLUDE__",
         ])
         if cache_key in self._free_staff_assignment_cache:
@@ -1095,10 +1101,6 @@ class GoogleCalendarHelper:
             staff_name = staff_data.get("name")
             if not staff_name:
                 continue
-
-            requested_service_ids = list(service_ids or [])
-            if not requested_service_ids and service_id:
-                requested_service_ids = [service_id]
 
             if not self._supports_all_services(staff_data, requested_service_ids):
                 continue
