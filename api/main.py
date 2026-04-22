@@ -86,7 +86,6 @@ def get_cached_display_name(user_id: str) -> str:
         return cached["display_name"] if cached else "Unknown"
 
 
-
 @app.on_event("startup")
 async def startup_event():
     """Start the reminder scheduler on application startup"""
@@ -200,13 +199,6 @@ def handle_message(event: MessageEvent):
                 return
         except Exception as e:
             logging.error(f"Failed to check user consent: {e}", exc_info=True)
-
-    # Mark user as seen
-    try:
-        from api.user_session_manager import user_session_manager
-        user_session_manager.mark_user_seen(user_id)
-    except Exception as e:
-        logging.error(f"Failed to mark user as seen: {e}", exc_info=True)
 
     try:
         # Consent flow
