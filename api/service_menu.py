@@ -221,8 +221,8 @@ def _create_category_entry_bubble() -> FlexBubble:
                     style="secondary",
                     height="sm",
                     action=PostbackAction(
-                        label="メニューを見る",
-                        displayText="メニューを見る",
+                        label="メニュー一覧",
+                        displayText="メニュー一覧",
                         data="action=view_single_menu_categories",
                     ),
                 )
@@ -259,7 +259,7 @@ def _create_single_menu_category_bubble(category: Dict[str, Any]) -> FlexBubble:
                     height="sm",
                     color="#111111",
                     action=PostbackAction(
-                        label="メニューを見る",
+                        label="メニュー一覧",
                         displayText=category_name,
                         data=f"action=view_single_menu_category&category_id={category_id}",
                     ),
@@ -385,3 +385,4 @@ def send_single_menu_services(reply_token, configuration, category_id: str) -> N
     except Exception as e:
         logging.error(f"Failed to send single menu services: {e}", exc_info=True)
         raise
+
