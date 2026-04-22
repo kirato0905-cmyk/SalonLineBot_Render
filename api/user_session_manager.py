@@ -19,10 +19,10 @@ class UserSessionManager:
             return True
 
     def mark_user_seen(self, user_id: str):
-        """Mark a user as seen (they have interacted with the bot)"""
+        """No-op for compatibility after removing Last Seen column"""
         try:
-            self.sheets_logger.mark_user_seen(user_id)
-            print(f"Marked user {user_id} as seen in Users sheet")
+            # google_sheets_logger 側も no-op だが、ここでも明示的に何もしない
+            return
         except Exception as e:
             logging.error(f"mark_user_seen failed for {user_id}: {e}")
 
@@ -30,8 +30,7 @@ class UserSessionManager:
         """Get total number of unique users who have interacted with the bot"""
         try:
             records = self.sheets_logger.users_worksheet.get_all_records() if self.sheets_logger.users_worksheet else []
-            # Count rows with a User ID
-            return sum(1 for r in records if r.get('User ID'))
+            return sum(1 for r in records if r.get("User ID"))
         except Exception as e:
             logging.error(f"get_user_count failed: {e}")
             return 0
