@@ -893,7 +893,7 @@ class ReservationFlow:
             "・メニューを見る",
         ])
         items.append({
-            "label": "単品メニューを見る",
+            "label": "メニューを見る",
             "type": "postback",
             "data": "action=view_single_menu",
         })
@@ -2184,7 +2184,7 @@ class ReservationFlow:
                 "data": f"action=select_featured_set&set_id={featured_set.get('id')}",
             })
         items.append({
-            "label": "単品メニューを見る",
+            "label": "メニューを見る",
             "type": "postback",
             "data": "action=view_single_menu",
         })
