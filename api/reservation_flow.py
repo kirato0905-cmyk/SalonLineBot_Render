@@ -110,10 +110,14 @@ class ReservationFlow:
         exclude_reservation_id: Optional[str],
     ) -> Dict[str, List[Dict[str, Any]]]:
         runtime_cache = self._ensure_runtime_cache(user_id)
+
+        service_ids = self._get_current_service_ids(user_id) if user_id else ([service_id] if service_id else [])
+        service_key = ",".join(sorted([sid for sid in service_ids if sid])) or (service_id or "__NO_SERVICE__")
+
         cache_key = self._make_available_slots_cache_key(
             selected_date=selected_date,
             staff_name="__STAFF_MAP__",
-            current_service_id=service_id,
+            current_service_id=f"__CART__:{service_key}",
             exclude_reservation_id=exclude_reservation_id,
         )
 
@@ -121,7 +125,11 @@ class ReservationFlow:
             return runtime_cache["staff_slots_map"][cache_key]
 
         staff_slots_map: Dict[str, List[Dict[str, Any]]] = {}
-        selectable_staff = self._get_selectable_staff_records(service_id)
+
+        if user_id:
+            selectable_staff = self._get_selectable_staff_records_for_cart(service_ids)
+        else:
+            selectable_staff = self._get_selectable_staff_records(service_id)
 
         for _staff_key, staff_data in selectable_staff:
             staff_name = staff_data.get("name")
@@ -133,7 +141,7 @@ class ReservationFlow:
                     selected_date,
                     exclude_reservation_id,
                     staff_name,
-                    service_id,
+                    None,
                 )
             except Exception as e:
                 logging.warning(f"Failed to get slots for staff={staff_name}, date={selected_date}: {e}")
@@ -251,11 +259,13 @@ class ReservationFlow:
     ) -> Optional[str]:
         duration_minutes = self._calculate_time_duration_minutes(start_time, end_time)
         service_ids = self._get_current_service_ids(user_id) if user_id else ([service_id] if service_id else [])
+        primary_service_id = service_ids[0] if service_ids else service_id
+
         assigned = self.google_calendar.assign_staff_for_free_reservation(
             date_str=selected_date,
             start_time=start_time,
             duration_minutes=duration_minutes,
-            service_id=service_id,
+            service_id=primary_service_id,
             service_ids=service_ids,
             exclude_reservation_id=exclude_reservation_id,
         )
@@ -1036,14 +1046,15 @@ class ReservationFlow:
     ) -> List[str]:
         valid_times = []
         exclude_reservation_id = self._get_exclude_reservation_id_for_date(user_id, selected_date)
-        service_id = self._get_current_service_id(user_id) if user_id else None
+        service_ids = self._get_current_service_ids(user_id) if user_id else []
+        primary_service_id = service_ids[0] if service_ids else None
 
         staff_slots_map: Dict[str, List[Dict[str, Any]]] = {}
         if self._is_no_preference_staff(staff_name):
             staff_slots_map = self._get_staff_available_slots_map_for_date(
                 user_id=user_id,
                 selected_date=selected_date,
-                service_id=service_id,
+                service_id=primary_service_id,
                 exclude_reservation_id=exclude_reservation_id,
             )
 
@@ -1056,7 +1067,7 @@ class ReservationFlow:
                     selected_date=selected_date,
                     start_time=start_time,
                     end_time=end_time,
-                    service_id=service_id,
+                    service_id=primary_service_id,
                     exclude_reservation_id=exclude_reservation_id,
                 )
                 if not assignable_staff:
@@ -1556,7 +1567,11 @@ class ReservationFlow:
             ds = d.strftime("%Y-%m-%d")
             if context == "new_reservation":
                 staff_name = self.user_states[user_id]["data"].get("staff")
-                duration = self._get_cart_total_duration(user_id) or 60
+                duration = self._get_cart_total_duration(user_id)
+
+                if duration <= 0:
+                    continue
+
                 if self._date_has_fittable_slot_new_booking(user_id, ds, staff_name, duration):
                     dates_out.append(ds)
 
