@@ -27,7 +27,11 @@ from api.chatgpt_faq import ChatGPTFAQ
 from api.reservation_flow import ReservationFlow
 from api.reminder_scheduler import reminder_scheduler
 from api.faq_menu import send_faq_menu, send_faq_answer_by_item, get_faq_by_number
-from api.service_menu import send_service_menu
+from api.service_menu import (
+    send_service_menu,
+    send_single_menu_categories,
+    send_single_menu_services,
+)
 from api.staff_intro import send_staff_intro
 from api.google_sheets_logger import get_sheets_logger
 from api.user_consent_manager import user_consent_manager
@@ -405,15 +409,21 @@ def handle_postback(event: PostbackEvent):
                 reply_text = "申し訳ございませんが、セットメニューの処理中にエラーが発生しました。"
         else:
             reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
-    elif action == "view_single_menu":
-        if reservation_flow:
-            try:
-                reply_text = reservation_flow.handle_reservation_flow(user_id, "単品メニューを見る")
-            except Exception as e:
-                logging.error(f"Failed to open single menu categories from postback: {e}", exc_info=True)
-                reply_text = "申し訳ございませんが、メニューカテゴリの表示中にエラーが発生しました。"
-        else:
-            reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
+    elif action in {"view_single_menu", "view_single_menu_categories"}:
+        try:
+            send_single_menu_categories(event.reply_token, configuration)
+            return
+        except Exception as e:
+            logging.error(f"Failed to open single menu categories from postback: {e}", exc_info=True)
+            reply_text = "申し訳ございませんが、メニューカテゴリの表示中にエラーが発生しました。"
+    elif action == "view_single_menu_category":
+        category_id = params.get("category_id", [None])[0]
+        try:
+            send_single_menu_services(event.reply_token, configuration, category_id)
+            return
+        except Exception as e:
+            logging.error(f"Failed to open single menu list from postback: {e}", exc_info=True)
+            reply_text = "申し訳ございませんが、メニュー一覧の表示中にエラーが発生しました。"
     else:
         reply_text = "選択内容を処理できませんでした。"
 
