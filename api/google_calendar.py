@@ -184,6 +184,15 @@ class GoogleCalendarHelper:
 
         return 60
 
+    def _supports_all_services(self, staff_data: Dict[str, Any], service_ids: Optional[List[str]] = None) -> bool:
+        normalized_ids = [sid for sid in (service_ids or []) if sid]
+        if not normalized_ids:
+            return True
+        configured = staff_data.get("service_ids")
+        if isinstance(configured, list) and configured:
+            return all(service_id in configured for service_id in normalized_ids)
+        return True
+
     def _get_staff_record_by_name(self, staff_name: str) -> Optional[Dict[str, Any]]:
         if not staff_name:
             return None
@@ -380,7 +389,10 @@ class GoogleCalendarHelper:
             self._reload_config_data()
 
             date_str = reservation_data["date"]
-            service_name = reservation_data["service"]
+            services = reservation_data.get("services") or reservation_data.get("cart") or []
+            service_name = reservation_data.get("service") or " / ".join(
+                [str(item.get("service_name", "")).strip() for item in services if isinstance(item, dict)]
+            )
             staff = reservation_data.get("assigned_staff") or reservation_data.get("staff")
             user_id = reservation_data.get("user_id", "")
             selected_staff = reservation_data.get("selected_staff")
@@ -403,9 +415,11 @@ class GoogleCalendarHelper:
             else:
                 time_str = reservation_data["time"]
                 start_datetime = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                duration_minutes = self._get_service_duration_minutes(
-                    reservation_data.get("service_id") or reservation_data.get("service")
-                )
+                duration_minutes = int(reservation_data.get("total_duration", 0) or 0)
+                if duration_minutes <= 0:
+                    duration_minutes = self._get_service_duration_minutes(
+                        reservation_data.get("service_id") or reservation_data.get("service")
+                    )
                 end_datetime = start_datetime + timedelta(minutes=duration_minutes)
 
             start_time_str = start_datetime.strftime("%H:%M")
@@ -437,6 +451,7 @@ class GoogleCalendarHelper:
             description_lines = [
                 f"予約ID: {reservation_id}",
                 f"サービス: {service_name}",
+                f"サービス一覧: {service_name}",
                 f"担当者: {assigned_staff}",
                 f"お客様: {client_name}",
                 f"所要時間: {duration_minutes}分",
@@ -708,7 +723,7 @@ class GoogleCalendarHelper:
             start_date.strftime("%Y-%m-%d %H:%M:%S"),
             end_date.strftime("%Y-%m-%d %H:%M:%S"),
             staff_name or "__NO_STAFF__",
-            service_id or "__NO_SERVICE__",
+            ",".join(service_ids or []) or service_id or "__NO_SERVICE__",
             exclude_reservation_id or "__NO_EXCLUDE__",
         ])
         if cache_key in self._slots_cache:
@@ -1041,6 +1056,7 @@ class GoogleCalendarHelper:
         start_time: str,
         duration_minutes: int,
         service_id: str = None,
+        service_ids: Optional[List[str]] = None,
         exclude_reservation_id: str = None,
     ) -> Optional[Dict[str, Any]]:
         """
@@ -1080,8 +1096,11 @@ class GoogleCalendarHelper:
             if not staff_name:
                 continue
 
-            service_ids = staff_data.get("service_ids")
-            if isinstance(service_ids, list) and service_ids and service_id and service_id not in service_ids:
+            requested_service_ids = list(service_ids or [])
+            if not requested_service_ids and service_id:
+                requested_service_ids = [service_id]
+
+            if not self._supports_all_services(staff_data, requested_service_ids):
                 continue
 
             if not self.check_staff_availability_for_time(
@@ -1137,6 +1156,7 @@ class GoogleCalendarHelper:
         start_time: str,
         end_time: str,
         service_id: str = None,
+        service_ids: Optional[List[str]] = None,
         exclude_reservation_id: str = None,
     ) -> Optional[str]:
         duration_minutes = 0
@@ -1155,6 +1175,7 @@ class GoogleCalendarHelper:
             start_time=start_time,
             duration_minutes=duration_minutes or 60,
             service_id=service_id,
+            service_ids=service_ids,
             exclude_reservation_id=exclude_reservation_id,
         )
         return assigned["staff_name"] if assigned else None
