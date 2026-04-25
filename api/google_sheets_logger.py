@@ -13,51 +13,16 @@ import pytz
 
 
 class GoogleSheetsLogger:
-    """Google Sheets logger for salon reservations and users.
+    """Google Sheets logger for:
+    1. Reservations sheet (reservation ledger)
+    2. Users sheet (initial registration + consent management)
 
-    改修内容:
-    - 予約シートの列名を日本語化
-    - 予約シートに電話番号を追加
-    - メニュー詳細データ（旧 Services JSON）を右端へ移動
-    - シート表示用ステータスを日本語化
-    - 備考列を追加
-    - キャンセルは削除せず「キャンセル履歴」へ転記
-    - 「今日の予約」シートを自動更新
-
-    既存コード互換:
-    - 既存の英語ヘッダーのシートも読み取り可能
-    - status は内部互換のため Confirmed / Cancelled で返す
-    - status_label に日本語ステータスを返す
+    Free-staff assignment対応版:
+    - selected_staff / assigned_staff を分離保持
+    - 既存の Staff 列には実担当（assigned_staff）を保持
     """
 
-    RESERVATIONS_SHEET_TITLE = "Reservations"
-    USERS_SHEET_TITLE = "Users"
-    TODAY_RESERVATIONS_SHEET_TITLE = "今日の予約"
-    CANCELLATION_HISTORY_SHEET_TITLE = "キャンセル履歴"
-
     RESERVATION_HEADERS = [
-        "予約作成日時",
-        "最終更新日時",
-        "予約ID",
-        "お客様名",
-        "電話番号",
-        "来店日",
-        "開始時間",
-        "終了時間",
-        "メニュー",
-        "お客様の選択",
-        "実際の担当者",
-        "担当者",
-        "所要時間（分）",
-        "金額",
-        "ステータス",
-        "備考",
-        "LINEユーザーID",
-        "メニュー詳細データ",
-    ]
-
-    # 旧 Reservations ヘッダー。既存データ移行・互換読取に使う。
-    LEGACY_RESERVATION_HEADERS = [
         "Timestamp",
         "Reservation ID",
         "User ID",
@@ -76,16 +41,6 @@ class GoogleSheetsLogger:
     ]
 
     USER_HEADERS = [
-        "初回登録日時",
-        "LINEユーザーID",
-        "LINE表示名",
-        "電話番号",
-        "状態",
-        "同意済み",
-        "同意日時",
-    ]
-
-    LEGACY_USER_HEADERS = [
         "Timestamp",
         "User ID",
         "Display Name",
@@ -94,82 +49,6 @@ class GoogleSheetsLogger:
         "Consented",
         "Consent Date",
     ]
-
-    TODAY_RESERVATION_HEADERS = [
-        "開始時間",
-        "お客様名",
-        "電話番号",
-        "メニュー",
-        "担当者",
-        "来店状況",
-        "支払い状況",
-        "備考",
-        "予約ID",
-    ]
-
-    CANCELLATION_HISTORY_HEADERS = [
-        "キャンセル日時",
-        "予約ID",
-        "お客様名",
-        "電話番号",
-        "来店予定日",
-        "開始時間",
-        "終了時間",
-        "メニュー",
-        "担当者",
-        "キャンセル理由",
-        "LINEユーザーID",
-    ]
-
-    FIELD_ALIASES = {
-        # reservation sheet aliases
-        "予約作成日時": ["予約作成日時", "Timestamp"],
-        "最終更新日時": ["最終更新日時"],
-        "予約ID": ["予約ID", "Reservation ID"],
-        "お客様名": ["お客様名", "Client Name"],
-        "電話番号": ["電話番号", "Phone Number"],
-        "来店日": ["来店日", "Date"],
-        "開始時間": ["開始時間", "Start Time"],
-        "終了時間": ["終了時間", "End Time"],
-        "メニュー": ["メニュー", "Service"],
-        "お客様の選択": ["お客様の選択", "Selected Staff"],
-        "実際の担当者": ["実際の担当者", "Assigned Staff"],
-        "担当者": ["担当者", "Staff"],
-        "所要時間（分）": ["所要時間（分）", "Duration (min)"],
-        "金額": ["金額", "Price"],
-        "ステータス": ["ステータス", "Status"],
-        "備考": ["備考", "Note", "Notes", "Memo"],
-        "LINEユーザーID": ["LINEユーザーID", "User ID"],
-        "メニュー詳細データ": ["メニュー詳細データ", "Services JSON"],
-        # user sheet aliases
-        "初回登録日時": ["初回登録日時", "Timestamp"],
-        "LINE表示名": ["LINE表示名", "Display Name"],
-        "状態": ["状態", "Status"],
-        "同意済み": ["同意済み", "Consented"],
-        "同意日時": ["同意日時", "Consent Date"],
-    }
-
-    FIELD_UPDATE_ALIASES = {
-        "Timestamp": "予約作成日時",
-        "Reservation ID": "予約ID",
-        "User ID": "LINEユーザーID",
-        "Client Name": "お客様名",
-        "Phone Number": "電話番号",
-        "Date": "来店日",
-        "Start Time": "開始時間",
-        "End Time": "終了時間",
-        "Service": "メニュー",
-        "Services JSON": "メニュー詳細データ",
-        "Selected Staff": "お客様の選択",
-        "Assigned Staff": "実際の担当者",
-        "Staff": "担当者",
-        "Duration (min)": "所要時間（分）",
-        "Price": "金額",
-        "Status": "ステータス",
-        "Note": "備考",
-        "Notes": "備考",
-        "Memo": "備考",
-    }
 
     _instance = None
     _instance_lock = threading.Lock()
@@ -188,8 +67,6 @@ class GoogleSheetsLogger:
 
         self.reservations_worksheet = None
         self.users_worksheet = None
-        self.today_reservations_worksheet = None
-        self.cancellation_history_worksheet = None
         self.spreadsheet = None
         self.tokyo_tz = pytz.timezone("Asia/Tokyo")
         self._records_cache: Dict[str, Dict[str, Any]] = {}
@@ -200,9 +77,6 @@ class GoogleSheetsLogger:
     def _get_tokyo_timestamp(self) -> str:
         tokyo_time = datetime.now(self.tokyo_tz)
         return tokyo_time.strftime("%Y-%m-%d %H:%M:%S")
-
-    def _get_tokyo_today_str(self) -> str:
-        return datetime.now(self.tokyo_tz).strftime("%Y-%m-%d")
 
     def _create_gspread_client(self):
         if GoogleSheetsLogger._gspread_client is not None:
@@ -222,7 +96,7 @@ class GoogleSheetsLogger:
 
         scope = [
             "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/drive"
         ]
 
         try:
@@ -264,38 +138,23 @@ class GoogleSheetsLogger:
                 return
 
             self.reservations_worksheet = self._get_or_create_worksheet(
-                title=self.RESERVATIONS_SHEET_TITLE,
+                title="Reservations",
                 rows=1000,
                 cols=len(self.RESERVATION_HEADERS),
-                headers=self.RESERVATION_HEADERS,
+                headers=self.RESERVATION_HEADERS
             )
             self.users_worksheet = self._get_or_create_worksheet(
-                title=self.USERS_SHEET_TITLE,
+                title="Users",
                 rows=1000,
-                cols=len(self.USER_HEADERS),
-                headers=self.USER_HEADERS,
+                cols=7,
+                headers=self.USER_HEADERS
             )
-            self.today_reservations_worksheet = self._get_or_create_worksheet(
-                title=self.TODAY_RESERVATIONS_SHEET_TITLE,
-                rows=200,
-                cols=len(self.TODAY_RESERVATION_HEADERS),
-                headers=self.TODAY_RESERVATION_HEADERS,
-            )
-            self.cancellation_history_worksheet = self._get_or_create_worksheet(
-                title=self.CANCELLATION_HISTORY_SHEET_TITLE,
-                rows=1000,
-                cols=len(self.CANCELLATION_HISTORY_HEADERS),
-                headers=self.CANCELLATION_HISTORY_HEADERS,
-            )
-            self.refresh_today_reservations_sheet()
             print("Google Sheets logger initialized successfully")
-            print("Reservations / Users / 今日の予約 / キャンセル履歴: active")
+            print("Sheet1: unused / Reservations: active / Users: initial registration only")
         except Exception as e:
-            logging.error(f"Failed to setup Google Sheets connection: {e}", exc_info=True)
+            logging.error(f"Failed to setup Google Sheets connection: {e}")
             self.reservations_worksheet = None
             self.users_worksheet = None
-            self.today_reservations_worksheet = None
-            self.cancellation_history_worksheet = None
             self.spreadsheet = None
 
     def _get_or_create_worksheet(self, title: str, rows: int, cols: int, headers: List[str]):
@@ -305,7 +164,7 @@ class GoogleSheetsLogger:
 
         try:
             worksheet = spreadsheet.worksheet(title)
-            self._ensure_headers_preserve_data(worksheet, headers)
+            self._ensure_headers(worksheet, headers)
             return worksheet
         except gspread.WorksheetNotFound:
             try:
@@ -320,42 +179,36 @@ class GoogleSheetsLogger:
             logging.error(f"Failed to get worksheet '{title}': {e}")
             return None
 
-    def _ensure_headers_preserve_data(self, worksheet, expected_headers: List[str]) -> bool:
-        """ヘッダー不一致時も既存行をなるべく保持して日本語ヘッダーへ移行する。"""
+    def _ensure_headers(self, worksheet, expected_headers: List[str]) -> bool:
         if not worksheet:
             return False
         try:
             actual_headers = worksheet.row_values(1)
             if not actual_headers:
                 worksheet.append_row(expected_headers)
+                print(f"Headers initialized for worksheet: {worksheet.title}")
                 return True
             if actual_headers == expected_headers:
                 return True
-
-            records = worksheet.get_all_records()
-            migrated_rows = []
-            for record in records:
-                migrated_rows.append([self._get_value(record, header) for header in expected_headers])
-
+            logging.warning(
+                f"Header mismatch detected in worksheet '{worksheet.title}'. Resetting headers."
+            )
             worksheet.clear()
             worksheet.append_row(expected_headers)
-            if migrated_rows:
-                worksheet.append_rows(migrated_rows, value_input_option="USER_ENTERED")
             self._invalidate_all_cache()
-            logging.info(f"Migrated headers for worksheet '{worksheet.title}' without dropping data")
             return True
         except Exception as e:
-            logging.error(f"Failed to ensure headers for worksheet '{worksheet.title}': {e}", exc_info=True)
+            logging.error(f"Failed to ensure headers for worksheet '{worksheet.title}': {e}")
             return False
 
     def _get_reservations_worksheet(self):
         if self.reservations_worksheet:
             return self.reservations_worksheet
         self.reservations_worksheet = self._get_or_create_worksheet(
-            title=self.RESERVATIONS_SHEET_TITLE,
+            title="Reservations",
             rows=1000,
             cols=len(self.RESERVATION_HEADERS),
-            headers=self.RESERVATION_HEADERS,
+            headers=self.RESERVATION_HEADERS
         )
         return self.reservations_worksheet
 
@@ -363,34 +216,12 @@ class GoogleSheetsLogger:
         if self.users_worksheet:
             return self.users_worksheet
         self.users_worksheet = self._get_or_create_worksheet(
-            title=self.USERS_SHEET_TITLE,
+            title="Users",
             rows=1000,
-            cols=len(self.USER_HEADERS),
-            headers=self.USER_HEADERS,
+            cols=7,
+            headers=self.USER_HEADERS
         )
         return self.users_worksheet
-
-    def _get_today_reservations_worksheet(self):
-        if self.today_reservations_worksheet:
-            return self.today_reservations_worksheet
-        self.today_reservations_worksheet = self._get_or_create_worksheet(
-            title=self.TODAY_RESERVATIONS_SHEET_TITLE,
-            rows=200,
-            cols=len(self.TODAY_RESERVATION_HEADERS),
-            headers=self.TODAY_RESERVATION_HEADERS,
-        )
-        return self.today_reservations_worksheet
-
-    def _get_cancellation_history_worksheet(self):
-        if self.cancellation_history_worksheet:
-            return self.cancellation_history_worksheet
-        self.cancellation_history_worksheet = self._get_or_create_worksheet(
-            title=self.CANCELLATION_HISTORY_SHEET_TITLE,
-            rows=1000,
-            cols=len(self.CANCELLATION_HISTORY_HEADERS),
-            headers=self.CANCELLATION_HISTORY_HEADERS,
-        )
-        return self.cancellation_history_worksheet
 
     def _invalidate_cache(self, key: str):
         self._records_cache.pop(key, None)
@@ -413,51 +244,6 @@ class GoogleSheetsLogger:
             "records": records,
         }
 
-    def _get_value(self, record: Dict[str, Any], canonical_key: str, default: Any = "") -> Any:
-        for key in self.FIELD_ALIASES.get(canonical_key, [canonical_key]):
-            if key in record and record.get(key) not in (None, ""):
-                return record.get(key)
-        return default
-
-    def _normalize_status_label(self, status: Any) -> str:
-        raw = str(status or "").strip()
-        lower = raw.lower()
-        mapping = {
-            "confirmed": "予約確定",
-            "予約確定": "予約確定",
-            "active": "予約確定",
-            "modified": "変更済み",
-            "変更済み": "変更済み",
-            "changed": "変更済み",
-            "cancelled": "キャンセル",
-            "canceled": "キャンセル",
-            "cancel": "キャンセル",
-            "cansel": "キャンセル",
-            "キャンセル": "キャンセル",
-            "キャンセル済み": "キャンセル",
-            "completed": "来店済み",
-            "done": "来店済み",
-            "来店済み": "来店済み",
-            "no_show": "無断キャンセル",
-            "noshow": "無断キャンセル",
-            "無断キャンセル": "無断キャンセル",
-        }
-        return mapping.get(lower, mapping.get(raw, raw or "予約確定"))
-
-    def _status_label_to_internal(self, status_label: Any) -> str:
-        label = self._normalize_status_label(status_label)
-        mapping = {
-            "予約確定": "Confirmed",
-            "変更済み": "Confirmed",  # 変更後も有効予約として扱う
-            "キャンセル": "Cancelled",
-            "来店済み": "Completed",
-            "無断キャンセル": "NoShow",
-        }
-        return mapping.get(label, str(status_label or ""))
-
-    def _is_active_reservation_status(self, status: Any) -> bool:
-        return self._status_label_to_internal(status) == "Confirmed"
-
     def _get_users_records(self) -> List[Dict[str, Any]]:
         cache_key = "users_records"
         cached = self._get_cached_records(cache_key)
@@ -468,7 +254,7 @@ class GoogleSheetsLogger:
         if not users_worksheet:
             return []
         try:
-            records = users_worksheet.get_all_records()
+            records = users_worksheet.get_all_records(expected_headers=self.USER_HEADERS)
             self._set_cached_records(cache_key, records)
             return records
         except Exception as e:
@@ -485,65 +271,50 @@ class GoogleSheetsLogger:
         if not reservations_worksheet:
             return []
         try:
-            records = reservations_worksheet.get_all_records()
+            records = reservations_worksheet.get_all_records(expected_headers=self.RESERVATION_HEADERS)
             self._set_cached_records(cache_key, records)
             return records
         except Exception as e:
             logging.error(f"Failed to get reservations from Google Sheets: {e}")
             return []
 
-    def _get_phone_number_for_user(self, user_id: str) -> str:
-        if not user_id:
-            return ""
-        user = self.get_user_by_id(user_id)
-        if not user:
-            return ""
-        return str(self._get_value(user, "電話番号", "") or "")
-
     def save_reservation(self, reservation_data: Dict[str, Any]) -> bool:
         reservations_worksheet = self._get_reservations_worksheet()
         if not reservations_worksheet:
             return False
         try:
-            user_id = reservation_data.get("user_id", "")
-            phone_number = reservation_data.get("phone_number") or self._get_phone_number_for_user(user_id)
             selected_staff = reservation_data.get("selected_staff", "")
             assigned_staff = reservation_data.get("assigned_staff") or reservation_data.get("staff", "")
-            timestamp = self._get_tokyo_timestamp()
             row_data = [
-                timestamp,
-                timestamp,
+                self._get_tokyo_timestamp(),
                 reservation_data.get("reservation_id", ""),
+                reservation_data.get("user_id", ""),
                 reservation_data.get("client_name", ""),
-                phone_number or "未入力",
                 reservation_data.get("date", ""),
                 reservation_data.get("start_time", ""),
                 reservation_data.get("end_time", ""),
                 reservation_data.get("service", ""),
+                json.dumps(reservation_data.get("services", []), ensure_ascii=False),
                 selected_staff,
                 assigned_staff,
                 assigned_staff,
                 reservation_data.get("duration", ""),
                 reservation_data.get("price", ""),
-                self._normalize_status_label(reservation_data.get("status", "Confirmed")),
-                reservation_data.get("note", reservation_data.get("備考", "")),
-                user_id,
-                json.dumps(reservation_data.get("services", []), ensure_ascii=False),
+                "Confirmed",
             ]
-            reservations_worksheet.append_row(row_data, value_input_option="USER_ENTERED")
+            reservations_worksheet.append_row(row_data)
             self._invalidate_cache("reservation_records")
-            self.refresh_today_reservations_sheet()
             print(f"Saved reservation {reservation_data.get('reservation_id')} to Google Sheets")
             return True
         except Exception as e:
-            logging.error(f"Failed to save reservation to Google Sheets: {e}", exc_info=True)
+            logging.error(f"Failed to save reservation to Google Sheets: {e}")
             return False
 
     def _record_to_reservation(self, record: Dict[str, Any]) -> Dict[str, Any]:
-        selected_staff = self._get_value(record, "お客様の選択", "")
-        assigned_staff = self._get_value(record, "実際の担当者", "") or self._get_value(record, "担当者", "")
-        raw_services = self._get_value(record, "メニュー詳細データ", "")
+        selected_staff = record.get("Selected Staff", "")
+        assigned_staff = record.get("Assigned Staff", "") or record.get("Staff", "")
         services = []
+        raw_services = record.get("Services JSON", "")
         if raw_services:
             try:
                 parsed = json.loads(raw_services)
@@ -551,19 +322,233 @@ class GoogleSheetsLogger:
                     services = parsed
             except Exception:
                 services = []
+        return {
+            "reservation_id": record.get("Reservation ID"),
+            "user_id": record.get("User ID"),
+            "client_name": record.get("Client Name"),
+            "date": record.get("Date"),
+            "start_time": record.get("Start Time"),
+            "end_time": record.get("End Time"),
+            "service": record.get("Service"),
+            "services": services,
+            "selected_staff": selected_staff,
+            "assigned_staff": assigned_staff,
+            "staff": assigned_staff,
+            "duration": record.get("Duration (min)"),
+            "price": record.get("Price"),
+            "status": record.get("Status"),
+        }
 
-# Global logger instance
+    def get_all_reservations(self) -> list:
+        records = self._get_reservation_records()
+        reservations = []
+        for record in records:
+            if record.get("Reservation ID"):
+                reservations.append(self._record_to_reservation(record))
+        return reservations
+
+    def get_confirmed_reservations(self) -> list:
+        return [res for res in self.get_all_reservations() if res.get("status") == "Confirmed"]
+
+    def get_user_reservations(self, client_name: str) -> list:
+        all_reservations = self.get_all_reservations()
+        return [
+            res for res in all_reservations
+            if res["client_name"] == client_name and res.get("status") == "Confirmed"
+        ]
+
+    def get_user_reservations_by_user_id(self, user_id: str) -> list:
+        all_reservations = self.get_all_reservations()
+        return [
+            res for res in all_reservations
+            if str(res.get("user_id", "")).strip() == str(user_id).strip()
+            and res.get("status") == "Confirmed"
+        ]
+
+    def update_reservation_status(self, reservation_id: str, status: str) -> bool:
+        reservations_worksheet = self._get_reservations_worksheet()
+        if not reservations_worksheet:
+            return False
+        try:
+            records = self._get_reservation_records()
+            status_col = self.RESERVATION_HEADERS.index("Status") + 1
+            for i, record in enumerate(records, start=2):
+                if record.get("Reservation ID") == reservation_id:
+                    reservations_worksheet.update_cell(i, status_col, status)
+                    self._invalidate_cache("reservation_records")
+                    print(f"Updated reservation {reservation_id} status to {status}")
+                    return True
+            logging.warning(f"Reservation {reservation_id} not found for status update")
+            return False
+        except Exception as e:
+            logging.error(f"Failed to update reservation status: {e}")
+            return False
+
+    def get_reservation_by_id(self, reservation_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            for record in self._get_reservation_records():
+                if record.get("Reservation ID") == reservation_id:
+                    return self._record_to_reservation(record)
+            return None
+        except Exception as e:
+            logging.error(f"Failed to get reservation by ID: {e}")
+            return None
+
+    def update_reservation_data(self, reservation_id: str, field_updates: Dict[str, Any]) -> bool:
+        reservations_worksheet = self._get_reservations_worksheet()
+        if not reservations_worksheet:
+            return False
+        try:
+            records = self._get_reservation_records()
+            for i, record in enumerate(records, start=2):
+                if record.get("Reservation ID") == reservation_id:
+                    for field, value in field_updates.items():
+                        if field in self.RESERVATION_HEADERS:
+                            column_index = self.RESERVATION_HEADERS.index(field) + 1
+                            reservations_worksheet.update_cell(i, column_index, value)
+                    self._invalidate_cache("reservation_records")
+                    print(f"Updated reservation {reservation_id} with fields: {list(field_updates.keys())}")
+                    return True
+            logging.warning(f"Reservation {reservation_id} not found for data update")
+            return False
+        except Exception as e:
+            logging.error(f"Failed to update reservation data: {e}")
+            return False
+
+    def get_reservations_for_date(self, date_str: str) -> List[Dict[str, Any]]:
+        try:
+            date_reservations = []
+            for record in self._get_reservation_records():
+                if record.get("Date") == date_str:
+                    date_reservations.append(self._record_to_reservation(record))
+            return date_reservations
+        except Exception as e:
+            logging.error(f"Error getting reservations for date {date_str}: {e}")
+            return []
+
+    def get_user_id_for_reservation(self, reservation_id: str) -> Optional[str]:
+        try:
+            for record in self._get_reservation_records():
+                if record.get("Reservation ID") == reservation_id:
+                    user_id = record.get("User ID", "")
+                    return user_id if user_id else None
+            logging.warning(f"Reservation {reservation_id} not found in sheets")
+            return None
+        except Exception as e:
+            logging.error(f"Error getting user ID for reservation {reservation_id}: {e}")
+            return None
+
+    def log_new_user(self, user_id: str, display_name: str, phone_number: str = "") -> bool:
+        users_worksheet = self._get_users_worksheet()
+        if not users_worksheet:
+            logging.error("Users worksheet not available. Cannot log user data.")
+            return False
+        try:
+            existing_records = self._get_users_records()
+            for record in existing_records:
+                if record.get("User ID") == user_id:
+                    print(f"User {user_id} already exists in Users sheet")
+                    return True
+
+            timestamp = self._get_tokyo_timestamp()
+            user_data = [
+                timestamp,
+                user_id,
+                display_name,
+                phone_number,
+                "Active",
+                "No",
+                "",
+            ]
+            users_worksheet.append_row(user_data)
+            self._invalidate_cache("users_records")
+            print(f"Successfully logged new user: {display_name} ({user_id})")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to log user data: {e}")
+            return False
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            for record in self._get_users_records():
+                if record.get("User ID") == user_id:
+                    return record
+            return None
+        except Exception as e:
+            logging.error(f"Error getting user by ID {user_id}: {e}")
+            return None
+
+    def update_user_status(self, user_id: str, status: str) -> bool:
+        users_worksheet = self._get_users_worksheet()
+        if not users_worksheet:
+            return False
+        try:
+            records = self._get_users_records()
+            for i, record in enumerate(records, start=2):
+                if record.get("User ID") == user_id:
+                    users_worksheet.update_cell(i, 5, status)
+                    self._invalidate_cache("users_records")
+                    print(f"Updated user {user_id} status to: {status}")
+                    return True
+            logging.warning(f"User {user_id} not found for status update")
+            return False
+        except Exception as e:
+            logging.error(f"Error updating user status: {e}")
+            return False
+
+    def has_user_consented(self, user_id: str) -> bool:
+        try:
+            for record in self._get_users_records():
+                if record.get("User ID") == user_id:
+                    return str(record.get("Consented", "")).strip().lower() == "yes"
+            return False
+        except Exception as e:
+            logging.error(f"Error checking consent for user {user_id}: {e}")
+            return False
+
+    def set_user_consent(self, user_id: str, consented: bool) -> bool:
+        users_worksheet = self._get_users_worksheet()
+        if not users_worksheet:
+            return False
+        try:
+            records = self._get_users_records()
+            for i, record in enumerate(records, start=2):
+                if record.get("User ID") == user_id:
+                    users_worksheet.update_cell(i, 6, "Yes" if consented else "No")
+                    users_worksheet.update_cell(i, 7, self._get_tokyo_timestamp() if consented else "")
+                    self._invalidate_cache("users_records")
+                    return True
+            return False
+        except Exception as e:
+            logging.error(f"Error setting consent for user {user_id}: {e}")
+            return False
+
+    def mark_user_seen(self, user_id: str) -> bool:
+        """
+        互換性維持用。
+        Users シートから Last Seen を削除したため no-op。
+        """
+        return True
+
+    def mark_user_consented(self, user_id: str) -> bool:
+        return self.set_user_consent(user_id, True)
+
+    def revoke_user_consent(self, user_id: str) -> bool:
+        return self.set_user_consent(user_id, False)
+
+    def is_new_user(self, user_id: str) -> bool:
+        try:
+            return self.get_user_by_id(user_id) is None
+        except Exception as e:
+            logging.error(f"Error checking new user for {user_id}: {e}")
+            return True
+
+
 _sheets_logger_instance = None
 
 
-def get_sheets_logger():
-    """
-    Get singleton GoogleSheetsLogger instance.
-    Existing modules import this function, so keep it for compatibility.
-    """
+def get_sheets_logger() -> GoogleSheetsLogger:
     global _sheets_logger_instance
-
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
-
     return _sheets_logger_instance
