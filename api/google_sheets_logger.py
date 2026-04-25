@@ -551,3 +551,19 @@ class GoogleSheetsLogger:
                     services = parsed
             except Exception:
                 services = []
+
+# Global logger instance
+_sheets_logger_instance = None
+
+
+def get_sheets_logger():
+    """
+    Get singleton GoogleSheetsLogger instance.
+    Existing modules import this function, so keep it for compatibility.
+    """
+    global _sheets_logger_instance
+
+    if _sheets_logger_instance is None:
+        _sheets_logger_instance = GoogleSheetsLogger()
+
+    return _sheets_logger_instance
