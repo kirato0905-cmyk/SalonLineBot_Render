@@ -644,15 +644,16 @@ class GoogleSheetsLogger:
             return "指名なし"
         return value
 
-    def _normalize_phone_number(self, phone_number: Any, for_sheet: bool = True) -> str:
-        value = str(phone_number or "").strip()
-        if value in {"", "None", "none", "null", "未登録"}:
-            return self.PHONE_UNREGISTERED_LABEL if for_sheet else ""
-        return value
+    def _clean_phone_digits(self, phone_number: Any) -> str:
+        """電話番号を比較・検索しやすい数字のみの形へ正規化する。
 
-    def _normalize_user_phone_number_for_storage(self, phone_number: Any) -> str:
+        Google Sheetsで文字列保存するために付けた先頭のシングルクォートは
+        内部処理では除去して扱う。
+        """
         value = str(phone_number or "").strip()
-        if not value:
+        if value.startswith("'"):
+            value = value[1:]
+        if value in {"", "None", "none", "null", "未登録"}:
             return ""
         return (
             value.replace("-", "")
@@ -662,6 +663,26 @@ class GoogleSheetsLogger:
             .replace(" ", "")
             .replace("　", "")
         )
+
+    def _phone_to_sheet_text(self, phone_number: Any) -> str:
+        """Google Sheets上で先頭の0が消えないよう、電話番号を文字列として保存する。
+
+        value_input_option=USER_ENTERED では 070... を数値扱いされる可能性があるため、
+        先頭にシングルクォートを付けて投入する。シート表示上は 070... と表示される。
+        """
+        digits = self._clean_phone_digits(phone_number)
+        if not digits:
+            return ""
+        return f"'{digits}"
+
+    def _normalize_phone_number(self, phone_number: Any, for_sheet: bool = True) -> str:
+        digits = self._clean_phone_digits(phone_number)
+        if not digits:
+            return self.PHONE_UNREGISTERED_LABEL if for_sheet else ""
+        return self._phone_to_sheet_text(digits) if for_sheet else digits
+
+    def _normalize_user_phone_number_for_storage(self, phone_number: Any) -> str:
+        return self._phone_to_sheet_text(phone_number)
 
     def _to_int_or_blank(self, value: Any) -> Any:
         if value is None or value == "":
@@ -1089,6 +1110,13 @@ class GoogleSheetsLogger:
                 "同意日時": "",
             }
             ws.append_row(self._user_record_to_row(record), value_input_option="USER_ENTERED")
+            try:
+                phone_col = self.USER_HEADERS.index("電話番号") + 1
+                phone_col_letter = self._column_number_to_letter(phone_col)
+                next_row = max(2, len(self._get_users_records()) + 1)
+                ws.format(f"{phone_col_letter}{next_row}", {"numberFormat": {"type": "TEXT"}})
+            except Exception as format_error:
+                logging.warning(f"Failed to set new user phone cell as text: {format_error}")
             self._invalidate_cache("users_records")
             return True
         except Exception as e:
@@ -1122,6 +1150,12 @@ class GoogleSheetsLogger:
             updated["電話番号"] = normalized_phone
             end_col = self._column_number_to_letter(len(self.USER_HEADERS))
             ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="USER_ENTERED")
+            try:
+                phone_col = self.USER_HEADERS.index("電話番号") + 1
+                phone_col_letter = self._column_number_to_letter(phone_col)
+                ws.format(f"{phone_col_letter}{row_index}", {"numberFormat": {"type": "TEXT"}})
+            except Exception as format_error:
+                logging.warning(f"Failed to set phone cell as text: {format_error}")
             self._invalidate_cache("users_records")
             return True
         except Exception as e:
