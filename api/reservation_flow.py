@@ -3307,7 +3307,7 @@ class ReservationFlow:
                     "Staff": new_data.get("assigned_staff") or new_data["staff"],
                     "Duration (min)": new_data["total_duration"],
                     "Price": new_data["total_price"],
-                    "Status": "Confirmed",
+                    "Status": "Modified",
                 }
                 self.sheets_logger.update_reservation_data(original_reservation_id, field_updates)
             except Exception as e:
