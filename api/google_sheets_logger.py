@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import logging
 import threading
 import time
@@ -644,18 +645,43 @@ class GoogleSheetsLogger:
             return "指名なし"
         return value
 
-    def _clean_phone_digits(self, phone_number: Any) -> str:
-        """電話番号を比較・検索しやすい数字のみの形へ正規化する。
+    def _restore_lost_leading_zero(self, digits: str) -> str:
+        """Google Sheets が電話番号を数値扱いして先頭0を落とした場合に復元する。
 
-        Google Sheetsで文字列保存するために付けた先頭のシングルクォートは
-        内部処理では除去して扱う。
+        例:
+        - 7048065920  -> 07048065920
+        - 8048065920  -> 08048065920
+        - 9048065920  -> 09048065920
+        - 5048065920  -> 05048065920
+
+        すでに 0 始まり、または復元対象外の値はそのまま返す。
+        """
+        digits = str(digits or "").strip()
+        if not digits:
+            return ""
+        if digits.startswith("0"):
+            return digits
+        # 携帯・IP電話系で先頭0が落ちた典型パターンを復元
+        if len(digits) == 10 and digits[0] in {"5", "7", "8", "9"}:
+            return "0" + digits
+        return digits
+
+    def _clean_phone_digits(self, phone_number: Any) -> str:
+        """電話番号を比較・保存しやすい数字のみの形へ正規化する。
+
+        - Google Sheets の文字列化用シングルクォートは除去
+        - ハイフン・空白は除去
+        - Sheets が数値化して 070... -> 704... になった値は可能な範囲で復元
         """
         value = str(phone_number or "").strip()
         if value.startswith("'"):
             value = value[1:]
         if value in {"", "None", "none", "null", "未登録"}:
             return ""
-        return (
+        # Sheets から 7048065920.0 のように返るケースを救済
+        if re.fullmatch(r"\d+\.0", value):
+            value = value[:-2]
+        cleaned = (
             value.replace("-", "")
             .replace("−", "")
             .replace("ー", "")
@@ -663,18 +689,15 @@ class GoogleSheetsLogger:
             .replace(" ", "")
             .replace("　", "")
         )
+        cleaned = re.sub(r"\D", "", cleaned)
+        return self._restore_lost_leading_zero(cleaned)
 
     def _phone_to_sheet_text(self, phone_number: Any) -> str:
-        """電話番号をGoogle Sheetsへ文字列として保存するための値にする。
-
-        先頭0を残すため、書き込み時は value_input_option=RAW と
-        電話番号列のTEXT形式を併用する。
-        セル値自体にはシングルクォートを入れず、数字文字列のまま返す。
-        """
+        """Google Sheetsへ電話番号を文字列として保存するための値にする。"""
         digits = self._clean_phone_digits(phone_number)
         if not digits:
             return ""
-        return digits
+        return str(digits)
 
     def _normalize_phone_number(self, phone_number: Any, for_sheet: bool = True) -> str:
         digits = self._clean_phone_digits(phone_number)
@@ -705,16 +728,20 @@ class GoogleSheetsLogger:
     def _resolve_phone_for_reservation_sheet(self, phone_number: Any, user_id: str = "") -> str:
         """予約一覧・今日の予約に保存する電話番号を決定する。
 
-        既にGoogle Sheets側で先頭0が落ちた予約行も、ユーザー一覧に正しい番号があれば復元する。
+        優先順位:
+        1. ユーザー一覧に正しい電話番号があればそれを優先
+        2. 予約データ側の電話番号
+        3. 未登録
         """
         sheet_phone = self._normalize_phone_number(phone_number, for_sheet=True)
         user_phone = self._get_user_phone_for_sheet_by_user_id(user_id) if user_id else ""
         user_digits = self._phone_digits_for_compare(user_phone)
         sheet_digits = self._phone_digits_for_compare(sheet_phone)
-        if user_digits and user_digits.startswith("0") and len(user_digits) in {10, 11}:
-            if not sheet_digits or sheet_digits != user_digits:
-                return self._phone_to_sheet_text(user_digits)
-        return sheet_phone
+        if user_digits and len(user_digits) in {10, 11}:
+            return self._phone_to_sheet_text(user_digits)
+        if sheet_digits and len(sheet_digits) in {10, 11}:
+            return self._phone_to_sheet_text(sheet_digits)
+        return self.PHONE_UNREGISTERED_LABEL
 
     def _format_phone_cell_as_text(self, worksheet, row_index: int, col_index: int) -> None:
         try:
@@ -723,6 +750,20 @@ class GoogleSheetsLogger:
         except Exception as e:
             logging.warning(f"Failed to format phone cell as text: row={row_index}, col={col_index}, error={e}")
 
+    def _write_phone_cell_as_text(self, worksheet, row_index: int, col_index: int, phone_value: Any) -> bool:
+        """電話番号セルをテキスト形式にしてからRAW文字列で更新する。"""
+        try:
+            value = self._phone_to_sheet_text(phone_value)
+            if not value:
+                value = self.PHONE_UNREGISTERED_LABEL
+            col_letter = self._column_number_to_letter(col_index)
+            self._format_phone_cell_as_text(worksheet, row_index, col_index)
+            worksheet.update(f"{col_letter}{row_index}", [[str(value)]], value_input_option="RAW")
+            return True
+        except Exception as e:
+            logging.warning(f"Failed to write phone cell as text: row={row_index}, col={col_index}, error={e}")
+            return False
+
     def _format_phone_column_as_text(self, worksheet, col_index: int, start_row: int = 2, end_row: Optional[int] = None) -> None:
         try:
             col_letter = self._column_number_to_letter(col_index)
@@ -730,6 +771,30 @@ class GoogleSheetsLogger:
             worksheet.format(f"{col_letter}{start_row}:{col_letter}{end}", {"numberFormat": {"type": "TEXT"}})
         except Exception as e:
             logging.warning(f"Failed to format phone column as text: col={col_index}, error={e}")
+
+    def _sync_user_phone_numbers_as_text(self) -> bool:
+        """ユーザー一覧の電話番号列を文字列保存へ補正する。"""
+        ws = self._get_users_worksheet()
+        if not ws:
+            return False
+        try:
+            records = self._get_users_records()
+            phone_col = self.USER_HEADERS.index("電話番号") + 1
+            changed = False
+            for row_index, record in enumerate(records, start=2):
+                current_phone = record.get("電話番号", "")
+                fixed_phone = self._normalize_user_phone_number_for_storage(current_phone)
+                if not fixed_phone:
+                    continue
+                if self._phone_digits_for_compare(current_phone) != self._phone_digits_for_compare(fixed_phone) or str(current_phone) != str(fixed_phone):
+                    if self._write_phone_cell_as_text(ws, row_index, phone_col, fixed_phone):
+                        changed = True
+            if changed:
+                self._invalidate_cache("users_records")
+            return changed
+        except Exception as e:
+            logging.warning(f"Failed to sync user phone numbers as text: {e}")
+            return False
 
     def _sync_reservation_phone_numbers_from_users(self) -> bool:
         """予約一覧の電話番号をユーザー一覧の正しい電話番号で補正する。"""
@@ -742,22 +807,20 @@ class GoogleSheetsLogger:
             changed = False
             for row_index, record in enumerate(records, start=2):
                 user_id = str(record.get("ユーザーID") or "").strip()
-                if not user_id:
-                    continue
                 current_phone = record.get("電話番号", "")
                 fixed_phone = self._resolve_phone_for_reservation_sheet(current_phone, user_id=user_id)
                 current_digits = self._phone_digits_for_compare(current_phone)
                 fixed_digits = self._phone_digits_for_compare(fixed_phone)
-                if fixed_digits and fixed_digits != current_digits:
-                    self._format_phone_cell_as_text(ws, row_index, phone_col)
-                    ws.update(f"{self._column_number_to_letter(phone_col)}{row_index}", [[fixed_phone]], value_input_option="RAW")
-                    changed = True
+                if fixed_digits and (fixed_digits != current_digits or str(current_phone) != str(fixed_phone)):
+                    if self._write_phone_cell_as_text(ws, row_index, phone_col, fixed_phone):
+                        changed = True
             if changed:
                 self._invalidate_cache("reservation_records")
             return changed
         except Exception as e:
             logging.warning(f"Failed to sync reservation phone numbers from users: {e}")
             return False
+
 
     def _to_int_or_blank(self, value: Any) -> Any:
         if value is None or value == "":
@@ -970,13 +1033,19 @@ class GoogleSheetsLogger:
                 "メニューJSON": self._json_dumps_services(services),
             }
             ws.append_row(self._record_to_row(record), value_input_option="RAW")
+            self._invalidate_cache("reservation_records")
+
+            # append_row 後に電話番号セルだけを明示的に RAW 文字列で上書きする。
+            # これで 070... が 704... に変換されるのを防ぐ。
             try:
                 phone_col = self.RESERVATION_HEADERS.index("電話番号") + 1
-                next_row = max(2, len(self._get_reservation_records()) + 1)
-                self._format_phone_cell_as_text(ws, next_row, phone_col)
+                row_index, _ = self._find_reservation_row(record.get("予約ID", ""))
+                if row_index:
+                    self._write_phone_cell_as_text(ws, row_index, phone_col, record.get("電話番号", ""))
+                    self._invalidate_cache("reservation_records")
             except Exception as format_error:
-                logging.warning(f"Failed to format reservation phone cell as text: {format_error}")
-            self._invalidate_cache("reservation_records")
+                logging.warning(f"Failed to rewrite reservation phone cell as text: {format_error}")
+
             self.refresh_today_reservations()
             return True
         except Exception as e:
@@ -1097,6 +1166,11 @@ class GoogleSheetsLogger:
             row_values = self._record_to_row(self._normalize_legacy_reservation_record(updated))
             end_col = self._column_number_to_letter(len(self.RESERVATION_HEADERS))
             ws.update(f"A{row_index}:{end_col}{row_index}", [row_values], value_input_option="RAW")
+            try:
+                phone_col = self.RESERVATION_HEADERS.index("電話番号") + 1
+                self._write_phone_cell_as_text(ws, row_index, phone_col, row_values[phone_col - 1])
+            except Exception as format_error:
+                logging.warning(f"Failed to rewrite updated reservation phone cell as text: {format_error}")
             self._invalidate_cache("reservation_records")
             self.refresh_today_reservations()
             return True
@@ -1148,6 +1222,7 @@ class GoogleSheetsLogger:
         if not ws:
             return False
         try:
+            self._sync_user_phone_numbers_as_text()
             self._sync_reservation_phone_numbers_from_users()
             rows = self._build_today_reservation_rows(self._get_tokyo_date())
             end_col = self._column_number_to_letter(len(self.TODAY_RESERVATION_HEADERS))
@@ -1203,14 +1278,17 @@ class GoogleSheetsLogger:
                 "同意日時": "",
             }
             ws.append_row(self._user_record_to_row(record), value_input_option="RAW")
+            self._invalidate_cache("users_records")
+
+            # append_row 後に電話番号セルだけを明示的にRAW文字列で上書きする。
             try:
                 phone_col = self.USER_HEADERS.index("電話番号") + 1
-                phone_col_letter = self._column_number_to_letter(phone_col)
-                next_row = max(2, len(self._get_users_records()) + 1)
-                ws.format(f"{phone_col_letter}{next_row}", {"numberFormat": {"type": "TEXT"}})
+                row_index, _ = self._find_user_row(user_id)
+                if row_index:
+                    self._write_phone_cell_as_text(ws, row_index, phone_col, record.get("電話番号", ""))
+                    self._invalidate_cache("users_records")
             except Exception as format_error:
-                logging.warning(f"Failed to set new user phone cell as text: {format_error}")
-            self._invalidate_cache("users_records")
+                logging.warning(f"Failed to rewrite new user phone cell as text: {format_error}")
             return True
         except Exception as e:
             logging.error(f"Failed to log user data: {e}")
@@ -1245,10 +1323,9 @@ class GoogleSheetsLogger:
             ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
             try:
                 phone_col = self.USER_HEADERS.index("電話番号") + 1
-                phone_col_letter = self._column_number_to_letter(phone_col)
-                ws.format(f"{phone_col_letter}{row_index}", {"numberFormat": {"type": "TEXT"}})
+                self._write_phone_cell_as_text(ws, row_index, phone_col, normalized_phone)
             except Exception as format_error:
-                logging.warning(f"Failed to set phone cell as text: {format_error}")
+                logging.warning(f"Failed to rewrite updated user phone cell as text: {format_error}")
             self._invalidate_cache("users_records")
             return True
         except Exception as e:
@@ -1337,4 +1414,5 @@ def get_sheets_logger() -> GoogleSheetsLogger:
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
     return _sheets_logger_instance
+
 
