@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import threading
 from urllib.parse import parse_qs
@@ -70,6 +71,135 @@ scheduler_thread = None
 
 _PROFILE_CACHE = {}
 _PROFILE_CACHE_TTL_SECONDS = 3600
+
+# 同意後の電話番号入力待ち状態。
+# プロセス内メモリ管理のため、サーバー再起動時は解除されます。
+_PHONE_INPUT_WAITING_USERS = set()
+_PHONE_INPUT_LOCK = threading.Lock()
+
+
+def set_phone_input_waiting(user_id: str) -> None:
+    with _PHONE_INPUT_LOCK:
+        _PHONE_INPUT_WAITING_USERS.add(user_id)
+
+
+def clear_phone_input_waiting(user_id: str) -> None:
+    with _PHONE_INPUT_LOCK:
+        _PHONE_INPUT_WAITING_USERS.discard(user_id)
+
+
+def is_phone_input_waiting(user_id: str) -> bool:
+    with _PHONE_INPUT_LOCK:
+        return user_id in _PHONE_INPUT_WAITING_USERS
+
+
+def normalize_phone_input(phone_text: str) -> str:
+    raw = str(phone_text or "").strip()
+    if not raw:
+        return ""
+    normalized_hyphen = raw.replace("−", "-").replace("ー", "-").replace("―", "-")
+    if not re.fullmatch(r"[0-9\-]+", normalized_hyphen):
+        return ""
+    digits = normalized_hyphen.replace("-", "")
+    if not digits.isdigit():
+        return ""
+    if len(digits) not in {10, 11}:
+        return ""
+    return digits
+
+
+def build_phone_input_prompt() -> str:
+    return """ご同意ありがとうございます。
+
+ご利用開始の前に、電話番号のご登録をお願いします。
+ご予約確認や緊急時のご連絡のために使用いたします。
+
+例：
+09012345678
+090-1234-5678"""
+
+
+def build_phone_input_error_message() -> str:
+    return """電話番号の形式が正しくありません。
+
+次のいずれかの形式で入力してください。
+・09012345678
+・090-1234-5678"""
+
+
+def build_welcome_after_phone_message() -> str:
+    return """電話番号のご登録ありがとうございます。
+
+すぐにご予約いただけます😊
+
+↓下のメニューからお進みください
+📅予約する
+
+その他何かご質問がございましたら、お気軽にお声かけください✨"""
+
+
+def user_has_registered_phone(user_id: str) -> bool:
+    """ユーザー一覧に電話番号が入っているか確認する。
+
+    電話番号入力待ち状態をメモリだけに依存させないため、
+    同意済みでも電話番号が未登録なら通常利用前に再度入力へ誘導する。
+    """
+    try:
+        user = get_sheets_logger().get_user_by_id(user_id)
+        if not user:
+            return False
+        raw_phone = user.get("電話番号") or user.get("Phone Number") or ""
+        return bool(normalize_phone_input(str(raw_phone).lstrip("\x27")))
+    except Exception as e:
+        logging.warning(f"Could not check user phone registration for {user_id}: {e}")
+        return False
+
+
+def reply_text(reply_token: str, text: str) -> None:
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text)])
+        )
+
+
+def handle_phone_number_input(user_id: str, user_name: str, message_text: str, reply_token: str):
+    """同意後の電話番号入力を通常フローより優先して処理する。"""
+    try:
+        normalized_phone = normalize_phone_input(message_text)
+        if not normalized_phone:
+            reply_text(reply_token, build_phone_input_error_message())
+            return
+
+        sheets_logger = get_sheets_logger()
+        updated = sheets_logger.update_user_phone_number(user_id, normalized_phone)
+
+        # ユーザー一覧に該当行がなかった場合の保険。
+        # FollowEvent未発火・旧シート移行漏れ・テスト環境の途中導入でも登録できるようにする。
+        if not updated:
+            logging.warning(f"Phone update failed once. Trying user upsert. user_id={user_id}")
+            if hasattr(sheets_logger, "upsert_user_phone_number"):
+                updated = sheets_logger.upsert_user_phone_number(user_id, user_name, normalized_phone)
+            else:
+                sheets_logger.log_new_user(user_id=user_id, display_name=user_name, phone_number="")
+                updated = sheets_logger.update_user_phone_number(user_id, normalized_phone)
+
+        if not updated:
+            logging.error(f"Failed to update phone number after retry. user_id={user_id}")
+            reply_text(
+                reply_token,
+                "電話番号の登録中にエラーが発生しました。\nお手数ですが、もう一度電話番号を入力してください。",
+            )
+            return
+
+        clear_phone_input_waiting(user_id)
+        reply_text(reply_token, build_welcome_after_phone_message())
+        print(f"User phone number registered: {user_id} ({user_name})")
+    except Exception as e:
+        logging.error(f"Failed to handle phone number input: {e}", exc_info=True)
+        try:
+            reply_text(reply_token, "電話番号の登録中にエラーが発生しました。もう一度お試しください。")
+        except Exception:
+            pass
 
 
 def get_cached_display_name(user_id: str) -> str:
@@ -165,8 +295,11 @@ def handle_message(event: MessageEvent):
 
     user_name = "Unknown"
 
-    # Check consent (except for consent-related messages)
-    if message_text not in ["同意画面を開く", "同意する", "同意しない", "よくある質問"]:
+    # Check consent (except for consent-related messages / phone input after consent)
+    if (
+        message_text not in ["同意画面を開く", "同意する", "同意しない", "よくある質問"]
+        and not is_phone_input_waiting(user_id)
+    ):
         try:
             if not user_consent_manager.has_user_consented(user_id):
                 user_name = get_cached_display_name(user_id)
@@ -204,6 +337,20 @@ def handle_message(event: MessageEvent):
         except Exception as e:
             logging.error(f"Failed to check user consent: {e}", exc_info=True)
 
+    # 同意済みでも電話番号が未登録なら、通常メニュー/FAQ/予約より先に電話番号登録へ誘導する。
+    # サーバー再起動などで _PHONE_INPUT_WAITING_USERS が消えても、電話番号取得フローが消えない。
+    if (
+        message_text not in ["同意画面を開く", "同意する", "同意しない"]
+        and not is_phone_input_waiting(user_id)
+    ):
+        try:
+            if user_consent_manager.has_user_consented(user_id) and not user_has_registered_phone(user_id):
+                set_phone_input_waiting(user_id)
+                reply_text(event.reply_token, build_phone_input_prompt())
+                return
+        except Exception as e:
+            logging.error(f"Failed to check phone registration gate: {e}", exc_info=True)
+
     try:
         # Consent flow
         if message_text == "同意画面を開く":
@@ -212,6 +359,11 @@ def handle_message(event: MessageEvent):
         elif message_text in ["同意する", "同意しない"]:
             user_name = get_cached_display_name(user_id)
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
+
+        # Phone number input after consent must be handled before FAQ / reservation flow.
+        if is_phone_input_waiting(user_id):
+            user_name = get_cached_display_name(user_id)
+            return handle_phone_number_input(user_id, user_name, message_text, event.reply_token)
 
         # Service menu
         service_menu_keywords = ["サービス一覧", "サービスメニュー", "メニュー"]
@@ -531,8 +683,10 @@ def handle_consent_screen(user_id: str, user_name: str, reply_token: str):
 
 【データの取り扱い】
 • 予約情報：日時、サービス、担当者
-• 連絡先：LINE ID、表示名
+• 連絡先：LINE ID、表示名、電話番号
 • 利用履歴：予約・変更・キャンセル記録
+
+※電話番号は、ご予約内容の確認や、変更・緊急時のご連絡のために利用します。
 
 これらの内容に同意していただける場合は、「同意する」とお送りください。"""
 
@@ -569,30 +723,40 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
     """Handle user's consent response"""
     try:
         if message_text == "同意する":
-            welcome_message = f"""ご同意ありがとうございます
+            from api.user_consent_manager import user_consent_manager
 
-{user_name}さん、
-すぐにご予約いただけます😊
+            # FollowEvent未発火/途中導入の保険。ユーザー一覧に行がなければ先に仮登録する。
+            try:
+                get_sheets_logger().log_new_user(user_id=user_id, display_name=user_name, phone_number="")
+            except Exception as e:
+                logging.warning(f"Could not ensure user row before consent. user_id={user_id}, error={e}")
 
-↓下のメニューからお進みください
-📅予約する
+            user_consent_manager.mark_user_consented(user_id)
 
-その他何かご質問がございましたら、お気軽にお声かけください✨
+            # 電話番号が未登録なら、絶対にウェルカムへ進めず電話番号入力へ送る。
+            if not user_has_registered_phone(user_id):
+                set_phone_input_waiting(user_id)
+                with ApiClient(configuration) as api_client:
+                    line_bot_api = MessagingApi(api_client)
+                    line_bot_api.reply_message_with_http_info(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[TextMessage(text=build_phone_input_prompt())],
+                        )
+                    )
+                print(f"User consented and phone input requested: {user_id} ({user_name})")
+                return
 
-💡ご希望の日時がある場合は、早めのご予約がおすすめです"""
-
+            clear_phone_input_waiting(user_id)
             with ApiClient(configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
                 line_bot_api.reply_message_with_http_info(
                     ReplyMessageRequest(
                         reply_token=reply_token,
-                        messages=[TextMessage(text=welcome_message)],
+                        messages=[TextMessage(text=build_welcome_after_phone_message())],
                     )
                 )
-
-            from api.user_consent_manager import user_consent_manager
-            user_consent_manager.mark_user_consented(user_id)
-            print(f"User consented: {user_id} ({user_name})")
+            print(f"User consented with existing phone: {user_id} ({user_name})")
 
         elif message_text == "同意しない":
             goodbye_message = f"""承知いたしました。
@@ -612,7 +776,9 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
                     )
                 )
 
+            clear_phone_input_waiting(user_id)
             print(f"User declined consent: {user_id} ({user_name})")
 
     except Exception as e:
         logging.error(f"Failed to handle consent response: {e}", exc_info=True)
+
