@@ -665,15 +665,16 @@ class GoogleSheetsLogger:
         )
 
     def _phone_to_sheet_text(self, phone_number: Any) -> str:
-        """Google Sheets上で先頭の0が消えないよう、電話番号を文字列として保存する。
+        """電話番号をGoogle Sheetsへ文字列として保存するための値にする。
 
-        value_input_option=USER_ENTERED では 070... を数値扱いされる可能性があるため、
-        先頭にシングルクォートを付けて投入する。シート表示上は 070... と表示される。
+        先頭0を残すため、書き込み時は value_input_option=RAW と
+        電話番号列のTEXT形式を併用する。
+        セル値自体にはシングルクォートを入れず、数字文字列のまま返す。
         """
         digits = self._clean_phone_digits(phone_number)
         if not digits:
             return ""
-        return f"'{digits}"
+        return digits
 
     def _normalize_phone_number(self, phone_number: Any, for_sheet: bool = True) -> str:
         digits = self._clean_phone_digits(phone_number)
@@ -749,7 +750,7 @@ class GoogleSheetsLogger:
                 fixed_digits = self._phone_digits_for_compare(fixed_phone)
                 if fixed_digits and fixed_digits != current_digits:
                     self._format_phone_cell_as_text(ws, row_index, phone_col)
-                    ws.update_cell(row_index, phone_col, fixed_phone)
+                    ws.update(f"{self._column_number_to_letter(phone_col)}{row_index}", [[fixed_phone]], value_input_option="RAW")
                     changed = True
             if changed:
                 self._invalidate_cache("reservation_records")
@@ -968,7 +969,7 @@ class GoogleSheetsLogger:
                 "ユーザーID": user_id,
                 "メニューJSON": self._json_dumps_services(services),
             }
-            ws.append_row(self._record_to_row(record), value_input_option="USER_ENTERED")
+            ws.append_row(self._record_to_row(record), value_input_option="RAW")
             try:
                 phone_col = self.RESERVATION_HEADERS.index("電話番号") + 1
                 next_row = max(2, len(self._get_reservation_records()) + 1)
@@ -1095,7 +1096,7 @@ class GoogleSheetsLogger:
                 updated["メニュー表示用"] = selected_menu_label
             row_values = self._record_to_row(self._normalize_legacy_reservation_record(updated))
             end_col = self._column_number_to_letter(len(self.RESERVATION_HEADERS))
-            ws.update(f"A{row_index}:{end_col}{row_index}", [row_values], value_input_option="USER_ENTERED")
+            ws.update(f"A{row_index}:{end_col}{row_index}", [row_values], value_input_option="RAW")
             self._invalidate_cache("reservation_records")
             self.refresh_today_reservations()
             return True
@@ -1158,7 +1159,7 @@ class GoogleSheetsLogger:
             except Exception as format_error:
                 logging.warning(f"Failed to format 今日の予約 phone column as text: {format_error}")
             if rows:
-                ws.update(f"A2:{end_col}{len(rows) + 1}", rows, value_input_option="USER_ENTERED")
+                ws.update(f"A2:{end_col}{len(rows) + 1}", rows, value_input_option="RAW")
             return True
         except Exception as e:
             logging.error(f"Failed to refresh 今日の予約: {e}")
@@ -1201,7 +1202,7 @@ class GoogleSheetsLogger:
                 "同意有無": "いいえ",
                 "同意日時": "",
             }
-            ws.append_row(self._user_record_to_row(record), value_input_option="USER_ENTERED")
+            ws.append_row(self._user_record_to_row(record), value_input_option="RAW")
             try:
                 phone_col = self.USER_HEADERS.index("電話番号") + 1
                 phone_col_letter = self._column_number_to_letter(phone_col)
@@ -1241,7 +1242,7 @@ class GoogleSheetsLogger:
             updated = dict(record)
             updated["電話番号"] = normalized_phone
             end_col = self._column_number_to_letter(len(self.USER_HEADERS))
-            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="USER_ENTERED")
+            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
             try:
                 phone_col = self.USER_HEADERS.index("電話番号") + 1
                 phone_col_letter = self._column_number_to_letter(phone_col)
@@ -1276,7 +1277,7 @@ class GoogleSheetsLogger:
             updated = dict(record)
             updated["ステータス"] = self._to_sheet_user_status(status)
             end_col = self._column_number_to_letter(len(self.USER_HEADERS))
-            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="USER_ENTERED")
+            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
             self._invalidate_cache("users_records")
             return True
         except Exception as e:
@@ -1308,7 +1309,7 @@ class GoogleSheetsLogger:
             updated["同意有無"] = "はい" if consented else "いいえ"
             updated["同意日時"] = self._get_tokyo_timestamp() if consented else ""
             end_col = self._column_number_to_letter(len(self.USER_HEADERS))
-            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="USER_ENTERED")
+            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
             self._invalidate_cache("users_records")
             return True
         except Exception as e:
