@@ -73,7 +73,7 @@ _PROFILE_CACHE = {}
 _PROFILE_CACHE_TTL_SECONDS = 3600
 
 # 同意後の電話番号入力待ち状態。
-# プロセス内メモリ管理のため、サーバー再起動時は解除される。
+# プロセス内メモリ管理のため、サーバー再起動時は解除されます。
 _PHONE_INPUT_WAITING_USERS = set()
 _PHONE_INPUT_LOCK = threading.Lock()
 
@@ -94,22 +94,12 @@ def is_phone_input_waiting(user_id: str) -> bool:
 
 
 def normalize_phone_input(phone_text: str) -> str:
-    """同意後に入力された電話番号を数字のみへ正規化する。
-
-    許可形式:
-    - 数字のみ
-    - 数字 + ハイフン
-    桁数:
-    - ハイフン除去後10桁または11桁
-    """
     raw = str(phone_text or "").strip()
     if not raw:
         return ""
-
     normalized_hyphen = raw.replace("−", "-").replace("ー", "-").replace("―", "-")
     if not re.fullmatch(r"[0-9\-]+", normalized_hyphen):
         return ""
-
     digits = normalized_hyphen.replace("-", "")
     if not digits.isdigit():
         return ""
@@ -151,10 +141,7 @@ def build_welcome_after_phone_message() -> str:
 def reply_text(reply_token: str, text: str) -> None:
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[TextMessage(text=text)],
-            )
+            ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text)])
         )
 
 
@@ -168,8 +155,19 @@ def handle_phone_number_input(user_id: str, user_name: str, message_text: str, r
 
         sheets_logger = get_sheets_logger()
         updated = sheets_logger.update_user_phone_number(user_id, normalized_phone)
+
+        # ユーザー一覧に該当行がなかった場合の保険。
+        # FollowEvent未発火・旧シート移行漏れ・テスト環境の途中導入でも登録できるようにする。
         if not updated:
-            logging.warning(f"Failed to update phone number for user_id={user_id}")
+            logging.warning(f"Phone update failed once. Trying user upsert. user_id={user_id}")
+            if hasattr(sheets_logger, "upsert_user_phone_number"):
+                updated = sheets_logger.upsert_user_phone_number(user_id, user_name, normalized_phone)
+            else:
+                sheets_logger.log_new_user(user_id=user_id, display_name=user_name, phone_number="")
+                updated = sheets_logger.update_user_phone_number(user_id, normalized_phone)
+
+        if not updated:
+            logging.error(f"Failed to update phone number after retry. user_id={user_id}")
             reply_text(
                 reply_token,
                 "電話番号の登録中にエラーが発生しました。\nお手数ですが、もう一度電話番号を入力してください。",
