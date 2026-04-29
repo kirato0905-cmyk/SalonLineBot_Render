@@ -684,6 +684,80 @@ class GoogleSheetsLogger:
     def _normalize_user_phone_number_for_storage(self, phone_number: Any) -> str:
         return self._phone_to_sheet_text(phone_number)
 
+    def _phone_digits_for_compare(self, phone_number: Any) -> str:
+        """比較用に電話番号を数字のみにする。"""
+        return self._clean_phone_digits(phone_number)
+
+    def _get_user_phone_for_sheet_by_user_id(self, user_id: str) -> str:
+        """ユーザー一覧の電話番号を、予約一覧・今日の予約へ転記できる文字列形式で返す。"""
+        if not user_id:
+            return ""
+        try:
+            user = self.get_user_by_id(user_id)
+            if not user:
+                return ""
+            return self._normalize_phone_number(user.get("電話番号") or user.get("Phone Number"), for_sheet=True)
+        except Exception as e:
+            logging.warning(f"Failed to get user phone for sheet. user_id={user_id}, error={e}")
+            return ""
+
+    def _resolve_phone_for_reservation_sheet(self, phone_number: Any, user_id: str = "") -> str:
+        """予約一覧・今日の予約に保存する電話番号を決定する。
+
+        既にGoogle Sheets側で先頭0が落ちた予約行も、ユーザー一覧に正しい番号があれば復元する。
+        """
+        sheet_phone = self._normalize_phone_number(phone_number, for_sheet=True)
+        user_phone = self._get_user_phone_for_sheet_by_user_id(user_id) if user_id else ""
+        user_digits = self._phone_digits_for_compare(user_phone)
+        sheet_digits = self._phone_digits_for_compare(sheet_phone)
+        if user_digits and user_digits.startswith("0") and len(user_digits) in {10, 11}:
+            if not sheet_digits or sheet_digits != user_digits:
+                return self._phone_to_sheet_text(user_digits)
+        return sheet_phone
+
+    def _format_phone_cell_as_text(self, worksheet, row_index: int, col_index: int) -> None:
+        try:
+            col_letter = self._column_number_to_letter(col_index)
+            worksheet.format(f"{col_letter}{row_index}", {"numberFormat": {"type": "TEXT"}})
+        except Exception as e:
+            logging.warning(f"Failed to format phone cell as text: row={row_index}, col={col_index}, error={e}")
+
+    def _format_phone_column_as_text(self, worksheet, col_index: int, start_row: int = 2, end_row: Optional[int] = None) -> None:
+        try:
+            col_letter = self._column_number_to_letter(col_index)
+            end = end_row or max(getattr(worksheet, "row_count", 0) or 1000, 1000)
+            worksheet.format(f"{col_letter}{start_row}:{col_letter}{end}", {"numberFormat": {"type": "TEXT"}})
+        except Exception as e:
+            logging.warning(f"Failed to format phone column as text: col={col_index}, error={e}")
+
+    def _sync_reservation_phone_numbers_from_users(self) -> bool:
+        """予約一覧の電話番号をユーザー一覧の正しい電話番号で補正する。"""
+        ws = self._get_reservations_worksheet()
+        if not ws:
+            return False
+        try:
+            records = self._get_reservation_records()
+            phone_col = self.RESERVATION_HEADERS.index("電話番号") + 1
+            changed = False
+            for row_index, record in enumerate(records, start=2):
+                user_id = str(record.get("ユーザーID") or "").strip()
+                if not user_id:
+                    continue
+                current_phone = record.get("電話番号", "")
+                fixed_phone = self._resolve_phone_for_reservation_sheet(current_phone, user_id=user_id)
+                current_digits = self._phone_digits_for_compare(current_phone)
+                fixed_digits = self._phone_digits_for_compare(fixed_phone)
+                if fixed_digits and fixed_digits != current_digits:
+                    self._format_phone_cell_as_text(ws, row_index, phone_col)
+                    ws.update_cell(row_index, phone_col, fixed_phone)
+                    changed = True
+            if changed:
+                self._invalidate_cache("reservation_records")
+            return changed
+        except Exception as e:
+            logging.warning(f"Failed to sync reservation phone numbers from users: {e}")
+            return False
+
     def _to_int_or_blank(self, value: Any) -> Any:
         if value is None or value == "":
             return ""
@@ -807,7 +881,10 @@ class GoogleSheetsLogger:
             "開始時間": self._normalize_time_value(pick("開始時間", "Start Time")),
             "終了時間": self._normalize_time_value(pick("終了時間", "End Time")),
             "顧客名": pick("顧客名", "Client Name"),
-            "電話番号": self._normalize_phone_number(pick("電話番号", "Phone Number"), for_sheet=True),
+            "電話番号": self._resolve_phone_for_reservation_sheet(
+                pick("電話番号", "Phone Number"),
+                user_id=pick("ユーザーID", "User ID"),
+            ),
             "メニュー表示用": service_display,
             "指名スタッフ": self._display_selected_staff(selected_staff),
             "実担当スタッフ": assigned_staff,
@@ -877,7 +954,10 @@ class GoogleSheetsLogger:
                 "開始時間": self._normalize_time_value(reservation_data.get("start_time", "")),
                 "終了時間": self._normalize_time_value(reservation_data.get("end_time", "")),
                 "顧客名": reservation_data.get("client_name", ""),
-                "電話番号": self._normalize_phone_number(reservation_data.get("phone_number") or self._get_phone_number_by_user_id(user_id), for_sheet=True),
+                "電話番号": self._resolve_phone_for_reservation_sheet(
+                    reservation_data.get("phone_number") or self._get_phone_number_by_user_id(user_id),
+                    user_id=user_id,
+                ),
                 "メニュー表示用": service_display,
                 "指名スタッフ": self._display_selected_staff(reservation_data.get("selected_staff", "")),
                 "実担当スタッフ": assigned_staff,
@@ -889,6 +969,12 @@ class GoogleSheetsLogger:
                 "メニューJSON": self._json_dumps_services(services),
             }
             ws.append_row(self._record_to_row(record), value_input_option="USER_ENTERED")
+            try:
+                phone_col = self.RESERVATION_HEADERS.index("電話番号") + 1
+                next_row = max(2, len(self._get_reservation_records()) + 1)
+                self._format_phone_cell_as_text(ws, next_row, phone_col)
+            except Exception as format_error:
+                logging.warning(f"Failed to format reservation phone cell as text: {format_error}")
             self._invalidate_cache("reservation_records")
             self.refresh_today_reservations()
             return True
@@ -1039,7 +1125,7 @@ class GoogleSheetsLogger:
                 self._normalize_time_value(record.get("開始時間", "")),
                 self._normalize_time_value(record.get("終了時間", "")),
                 record.get("顧客名", ""),
-                self._normalize_phone_number(record.get("電話番号", ""), for_sheet=True),
+                self._resolve_phone_for_reservation_sheet(record.get("電話番号", ""), user_id=record.get("ユーザーID", "")),
                 record.get("メニュー表示用", ""),
                 record.get("実担当スタッフ", ""),
                 status,
@@ -1061,10 +1147,16 @@ class GoogleSheetsLogger:
         if not ws:
             return False
         try:
+            self._sync_reservation_phone_numbers_from_users()
             rows = self._build_today_reservation_rows(self._get_tokyo_date())
             end_col = self._column_number_to_letter(len(self.TODAY_RESERVATION_HEADERS))
             ws.update(f"A1:{end_col}1", [self.TODAY_RESERVATION_HEADERS], value_input_option="USER_ENTERED")
             self._clear_today_reservation_data_rows(ws, row_count_hint=max(200, len(rows) + 10))
+            try:
+                today_phone_col = self.TODAY_RESERVATION_HEADERS.index("電話番号") + 1
+                self._format_phone_column_as_text(ws, today_phone_col, start_row=2, end_row=max(200, len(rows) + 10))
+            except Exception as format_error:
+                logging.warning(f"Failed to format 今日の予約 phone column as text: {format_error}")
             if rows:
                 ws.update(f"A2:{end_col}{len(rows) + 1}", rows, value_input_option="USER_ENTERED")
             return True
@@ -1244,3 +1336,4 @@ def get_sheets_logger() -> GoogleSheetsLogger:
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
     return _sheets_logger_instance
+
