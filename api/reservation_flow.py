@@ -3324,6 +3324,8 @@ class ReservationFlow:
                         "end_time": new_data.get("end_time", ""),
                         "service": new_data["service"],
                         "staff": new_data.get("assigned_staff") or new_data["staff"],
+                        "total_price": new_data["total_price"],
+                        "price": new_data["total_price"],
                     },
                     client_name,
                 )
