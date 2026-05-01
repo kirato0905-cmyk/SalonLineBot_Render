@@ -54,6 +54,12 @@ class SlackNotifier:
         self.config_data = self._load_config_data()
         self.services = self.config_data.get("services", {})
 
+    def _build_calendar_link_text(self, calendar_url: str) -> str:
+        """Build Slack mrkdwn link text for calendar URL."""
+        if not calendar_url:
+            return ""
+        return f"<{calendar_url}|カレンダーを開く>"
+
     def send_notification(self, message: str, title: str = None, color: str = "good") -> bool:
         """
         Send a notification to Slack.
@@ -107,15 +113,48 @@ class SlackNotifier:
         logging.info("User login operator notification is disabled.")
         return True
 
+    def _extract_price(self, data: Dict[str, Any], service_name: str = "") -> int:
+        """Extract price from multiple possible reservation payload keys."""
+        for key in ("total_price", "price", "Price", "料金"):
+            value = data.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                if isinstance(value, str):
+                    normalized = value.replace("¥", "").replace(",", "").strip()
+                    if not normalized:
+                        continue
+                    return int(float(normalized))
+                return int(value)
+            except Exception:
+                continue
+
+        if service_name:
+            return self._get_service_price(service_name)
+        return 0
+
+    def _format_price_change_line(self, old_reservation: Dict[str, Any], new_reservation: Dict[str, Any]) -> str:
+        """Build price line for reservation modification notification."""
+        old_service = str(old_reservation.get("service", "") or "")
+        new_service = str(new_reservation.get("service", "") or "")
+        old_price = self._extract_price(old_reservation, old_service)
+        new_price = self._extract_price(new_reservation, new_service)
+
+        if old_price > 0 and new_price > 0:
+            return f"💰¥{old_price:,} ⇒ ¥{new_price:,}"
+        if new_price > 0:
+            return f"💰¥{new_price:,}"
+        if old_price > 0:
+            return f"💰¥{old_price:,} ⇒ 未設定"
+        return "💰未設定"
+
     def notify_reservation_confirmation(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
         """Send notification when reservation is confirmed. Wording follows LINE version."""
         staff_name = reservation_data.get("staff")
         calendar_url = self._get_calendar_url(staff_name)
 
         service_name = reservation_data.get("service", "")
-        price = int(reservation_data.get("total_price", 0) or reservation_data.get("price", 0) or 0)
-        if price <= 0:
-            price = self._get_service_price(service_name)
+        price = self._extract_price(reservation_data, service_name)
 
         message = f"👤{client_name}\n"
         message += f"📅{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}\n"
@@ -123,8 +162,9 @@ class SlackNotifier:
         message += f"💰¥{price:,}\n\n"
         message += f"🆔{reservation_data.get('reservation_id', 'N/A')}"
 
-        if calendar_url:
-            message += f"\n\nカレンダー：\n{calendar_url}"
+        calendar_link = self._build_calendar_link_text(calendar_url)
+        if calendar_link:
+            message += f"\n\n{calendar_link}"
 
         return self.send_notification(
             message=message,
@@ -149,10 +189,12 @@ class SlackNotifier:
         message += f"📅{old_reservation.get('date', 'N/A')} ⇒ {new_reservation.get('date', 'N/A')}\n"
         message += f"⏰{old_time} ⇒ {new_time}\n"
         message += f"💇{old_reservation.get('service', 'N/A')} ⇒ {new_reservation.get('service', 'N/A')}\n"
-        message += f"🧑{old_reservation.get('staff', 'N/A')} ⇒ {new_reservation.get('staff', 'N/A')}"
+        message += f"🧑{old_reservation.get('staff', 'N/A')} ⇒ {new_reservation.get('staff', 'N/A')}\n"
+        message += self._format_price_change_line(old_reservation, new_reservation)
 
-        if calendar_url:
-            message += f"\n\nカレンダー：\n{calendar_url}"
+        calendar_link = self._build_calendar_link_text(calendar_url)
+        if calendar_link:
+            message += f"\n\n{calendar_link}"
 
         return self.send_notification(
             message=message,
@@ -170,8 +212,9 @@ class SlackNotifier:
         message += f"💇{reservation_data.get('service', 'N/A')}（{reservation_data.get('staff', 'N/A')}）\n\n"
         message += f"🆔{reservation_data.get('reservation_id', 'N/A')}"
 
-        if calendar_url:
-            message += f"\n\nカレンダー：\n{calendar_url}"
+        calendar_link = self._build_calendar_link_text(calendar_url)
+        if calendar_link:
+            message += f"\n\n{calendar_link}"
 
         return self.send_notification(
             message=message,
