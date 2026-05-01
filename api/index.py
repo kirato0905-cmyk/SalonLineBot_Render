@@ -617,12 +617,6 @@ def handle_follow(event: FollowEvent):
 
     user_name = get_cached_display_name(user_id)
 
-    try:
-        from api.notification_manager import send_user_login_notification
-        send_user_login_notification(user_id, user_name)
-        print(f"New user added bot as friend: {user_id} ({user_name})")
-    except Exception as e:
-        logging.error(f"Failed to send user login notification: {e}", exc_info=True)
 
     try:
         sheets_logger = get_sheets_logger()
