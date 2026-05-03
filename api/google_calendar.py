@@ -7,6 +7,7 @@ Google Calendar integration for salon reservations
 import os
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, date, time
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -51,7 +52,7 @@ class GoogleCalendarHelper:
         try:
             self._authenticate()
         except Exception as e:
-            print(f"Failed to initialize Google Calendar: {e}")
+            logging.error(f"Failed to initialize Google Calendar: {e}", exc_info=True)
             self.service = None
 
     def _config_path(self) -> str:
@@ -162,25 +163,28 @@ class GoogleCalendarHelper:
 
             self.service_account_email = service_account_info.get("client_email", "")
             if self.service_account_email:
-                print("Google Calendar API authenticated successfully")
-                print(f"Service Account Email: {self.service_account_email}")
-                print("IMPORTANT: Share each staff calendar with this email address!")
+                logging.info("Google Calendar API authenticated successfully")
+                logging.info(f"Service Account Email: {self.service_account_email}")
+                logging.info("IMPORTANT: Share each staff calendar with this email address!")
             else:
-                print("Google Calendar API authenticated successfully (service account email not found)")
+                logging.info("Google Calendar API authenticated successfully (service account email not found)")
 
             self.service = build("calendar", "v3", credentials=credentials)
 
         except Exception as e:
-            print(f"Failed to authenticate with Google Calendar: {e}")
+            logging.error(f"Failed to authenticate with Google Calendar: {e}", exc_info=True)
             self.service = None
 
     def generate_reservation_id(self, date_str: str) -> str:
+        """Generate collision-resistant reservation ID.
+
+        Format: RES-YYYYMMDD-XXXXXX
+        The previous millisecond modulo format could collide under concurrent reservations.
+        """
         date_obj = datetime.strptime(date_str, "%Y-%m-%d")
         date_part = date_obj.strftime("%Y%m%d")
-
-        import time as time_module
-        counter = int(time_module.time() * 1000) % 10000
-        return f"RES-{date_part}-{counter:04d}"
+        suffix = uuid.uuid4().hex[:6].upper()
+        return f"RES-{date_part}-{suffix}"
 
     def _get_service_duration_minutes(self, service_identifier: str) -> int:
         if not service_identifier:
@@ -1160,5 +1164,6 @@ class GoogleCalendarHelper:
             exclude_reservation_id=exclude_reservation_id,
         )
         return assigned["staff_name"] if assigned else None
+
 
 
