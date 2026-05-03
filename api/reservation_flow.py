@@ -1068,36 +1068,42 @@ class ReservationFlow:
         return matched
 
     def _build_initial_menu_selection_message(self) -> Dict[str, Any]:
-        context = self._build_message_context()
-        initial_text = self._get_reservation_message(
-            "initial_menu",
-            context,
-            fallback="ご希望のメニューをお選びください👇",
-        )
-        lines = [
-            initial_text,
-            "",
-            "【人気セットメニュー】",
-        ]
+        featured_set_lines: List[str] = []
         items: List[Dict[str, Any]] = []
+
         for featured_set in self._get_featured_sets():
-            lines.append(f"・{featured_set.get('name')}")
+            featured_set_name = str(featured_set.get("name", "")).strip()
+            if not featured_set_name:
+                continue
+            featured_set_lines.append(f"・{featured_set_name}")
             items.append({
-                "label": str(featured_set.get("name")),
+                "label": featured_set_name,
                 "type": "postback",
                 "data": f"action=select_featured_set&set_id={featured_set.get('id')}",
             })
 
-        lines.extend([
-            "",
-            "【その他】",
-            "・メニューを見る",
-        ])
+        featured_sets_text = "\n".join(featured_set_lines) if featured_set_lines else "・現在おすすめセットは準備中です"
+        fallback_text = (
+            "ご希望のメニューをお選びください👇\n\n"
+            "【人気セットメニュー】\n"
+            f"{featured_sets_text}\n\n"
+            "【その他】\n"
+            "・メニューを見る"
+        )
+        context = self._build_message_context(None, {
+            "featured_sets": featured_sets_text,
+        })
+        text = self._get_reservation_message(
+            "initial_menu",
+            context,
+            fallback=fallback_text,
+        )
+
         items.append({
             "label": "メニューを見る",
             "text": "メニューを見る",
         })
-        return self._quick_reply_return("\n".join(lines), items, include_cancel=True, include_back=False)
+        return self._quick_reply_return(text, items, include_cancel=True, include_back=False)
 
     def _build_category_selection_message(self, prefix: Optional[str] = None) -> Dict[str, Any]:
         lines = []
@@ -1551,27 +1557,34 @@ class ReservationFlow:
         recommended = display_options[:recommend_count]
         others = display_options[recommend_count:recommend_count + other_count]
 
-        lines = [
-            f"{selected_date}ですね👌",
-            "",
-            f"{service_name}（{service_duration}分）の空き状況はこちら。",
-            "",
-        ]
-
+        recommended_section = ""
         if recommended:
-            lines.append("【🔥おすすめ】")
-            for t in recommended:
-                lines.append(f"・{t}～")
-            lines.append("")
+            recommended_lines = ["【🔥おすすめ】"]
+            recommended_lines.extend([f"・{t}～" for t in recommended])
+            recommended_section = "\n".join(recommended_lines) + "\n\n"
 
+        other_section = ""
         if others:
-            lines.append("【その他】")
-            for t in others:
-                lines.append(f"・{t}～")
-            lines.append("")
+            other_lines = ["【その他】"]
+            other_lines.extend([f"・{t}～" for t in others])
+            other_section = "\n".join(other_lines) + "\n\n"
 
-        lines.append("ご希望の時間をお選びください👇")
-        return "\n".join(lines)
+        fallback_text = (
+            f"{selected_date}ですね👌\n\n"
+            f"{service_name}（{service_duration}分）の空き状況はこちら。\n\n"
+            f"{recommended_section}"
+            f"{other_section}"
+            "ご希望の時間をお選びください👇"
+        )
+        context_data = self._build_message_context(None, {
+            "date": selected_date,
+            "service": service_name,
+            "duration": service_duration,
+            "recommended_section": recommended_section,
+            "other_section": other_section,
+            "has_recommended_slot": bool(recommended),
+        })
+        return self._get_reservation_message("time_selection", context_data, fallback=fallback_text)
 
     def _build_time_selection_quick_reply(
         self,
@@ -2046,6 +2059,7 @@ class ReservationFlow:
             "limit_days": limit_days,
             "example_date": example_date,
             "week_start": ws.strftime("%Y-%m-%d"),
+            "reservation_hint": "土日・午前中はご予約が埋まりやすいため、ご希望のお時間がある場合はお早めのご予約がおすすめです。",
             "has_weekend_in_week": any(datetime.strptime(ds, "%Y-%m-%d").date().weekday() >= 5 for ds in bookable),
         })
         context_data["is_weekend"] = bool(context_data.get("has_weekend_in_week"))
