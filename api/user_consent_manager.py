@@ -1,14 +1,15 @@
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from api.google_sheets_logger import get_sheets_logger
 
 
 class UserConsentManager:
-    """Usersシート同意確認の軽量ラッパー
+    """Usersシート同意確認の軽量ラッパー。
 
     - 同意状態を短時間メモリキャッシュ
+    - Sheets一時障害時は期限切れキャッシュをstale fallbackとして利用
     - 実データは GoogleSheetsLogger に委譲
     """
 
@@ -16,12 +17,20 @@ class UserConsentManager:
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._ttl_seconds = 30
 
+    def _get_cached_item(self, user_id: str) -> Optional[Dict[str, Any]]:
+        return self._cache.get(user_id)
+
     def _get_cached(self, user_id: str):
-        item = self._cache.get(user_id)
+        item = self._get_cached_item(user_id)
         if not item:
             return None
         if time.time() - item["fetched_at"] > self._ttl_seconds:
-            self._cache.pop(user_id, None)
+            return None
+        return item["consented"]
+
+    def _get_stale_cached(self, user_id: str):
+        item = self._get_cached_item(user_id)
+        if not item:
             return None
         return item["consented"]
 
@@ -43,6 +52,13 @@ class UserConsentManager:
             self._set_cached(user_id, consented)
             return consented
         except Exception as e:
+            stale = self._get_stale_cached(user_id)
+            if stale is not None:
+                logging.warning(
+                    f"Consent check failed. Using stale cache for {user_id}: {e}",
+                    exc_info=True,
+                )
+                return bool(stale)
             logging.error(f"Failed to check user consent for {user_id}: {e}", exc_info=True)
             return False
 
@@ -68,4 +84,3 @@ class UserConsentManager:
 
 
 user_consent_manager = UserConsentManager()
-
