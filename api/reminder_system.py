@@ -27,7 +27,7 @@ class ReminderSystem:
         if not self.enabled:
             logging.warning("LINE Channel Access Token not configured. Reminder system disabled.")
         else:
-            print("Reminder system enabled")
+            logging.info("Reminder system enabled")
 
     def _config_path(self) -> str:
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -342,13 +342,16 @@ class ReminderSystem:
         total_count: int,
         failed_reservations: List[Dict[str, Any]],
     ) -> bool:
-        """Send notification to manager about reminder status"""
-        try:
-            from api.notification_manager import line_notifier
-            return line_notifier.notify_reminder_status(success_count, total_count, failed_reservations)
-        except Exception as e:
-            logging.error(f"Error sending reminder notification to manager: {e}", exc_info=True)
-            return False
+        """No-op by specification.
+
+        Customer-facing reminders are sent by LINE, but operator notifications for
+        reminder delivery results are intentionally disabled.
+        """
+        logging.info(
+            "Reminder manager notification is disabled by specification. "
+            f"success={success_count}, total={total_count}, failed={len(failed_reservations)}"
+        )
+        return True
 
     def run_daily_reminders(self) -> Dict[str, Any]:
         """Run daily reminder process"""
@@ -376,7 +379,7 @@ class ReminderSystem:
                 failed_reservations.append(reservation)
                 print(f"❌ No user ID found for reservation {reservation.get('reservation_id')}")
 
-        self.send_reminder_notification_to_manager(success_count, len(reservations), failed_reservations)
+        # Operator notification for reminder delivery results is disabled by specification.
 
         result = {
             "success_count": success_count,
@@ -395,4 +398,5 @@ reminder_system = ReminderSystem()
 def run_daily_reminders():
     """Convenience function to run daily reminders"""
     return reminder_system.run_daily_reminders()
+
 
