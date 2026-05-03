@@ -49,6 +49,7 @@ class ReservationFlow:
 
         self.back_label = "← 戻る"
         self._config_mtime = self._get_config_mtime()
+        self._messages_mtime = self._get_messages_mtime()
         self.messages_data = self._load_messages_data()
 
 
@@ -300,6 +301,19 @@ class ReservationFlow:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(current_dir, "data", "messages.json")
 
+    def _get_messages_mtime(self) -> Optional[float]:
+        try:
+            return os.path.getmtime(self._messages_path())
+        except Exception:
+            return None
+
+    def _reload_messages_if_changed(self, force: bool = False) -> None:
+        current_mtime = self._get_messages_mtime()
+        if not force and current_mtime is not None and self._messages_mtime == current_mtime:
+            return
+        self.messages_data = self._load_messages_data()
+        self._messages_mtime = current_mtime
+
     def _load_messages_data(self) -> Dict[str, Any]:
         """
         Load reservation message templates from api/data/messages.json.
@@ -326,6 +340,7 @@ class ReservationFlow:
             return {}
 
     def _get_message_template(self, scene: str, variant: str = "default") -> str:
+        self._reload_messages_if_changed()
         """
         Get reservation message template by scene + variant.
 
@@ -361,22 +376,29 @@ class ReservationFlow:
         Render {key} placeholders safely.
 
         Missing keys are replaced with an empty string so message rendering
-        never raises KeyError during the reservation flow.
+        never raises KeyError during the reservation flow. Missing keys are also
+        logged so broken templates can be found in production logs.
         """
         if not template:
             return ""
 
         safe_params = params or {}
+        missing_keys = set()
 
         def replace_placeholder(match):
             key = match.group(1)
-            value = safe_params.get(key, "")
-            if value is None:
+            if key not in safe_params or safe_params.get(key) is None:
+                missing_keys.add(key)
                 return ""
-            return str(value)
+            return str(safe_params.get(key))
 
         try:
-            return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", replace_placeholder, str(template))
+            rendered = re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", replace_placeholder, str(template))
+            if missing_keys:
+                logging.warning(
+                    f"Missing message placeholders: {sorted(missing_keys)} template={str(template)[:120]}"
+                )
+            return rendered
         except Exception as e:
             logging.warning(f"Failed to render message template. error={e}")
             return str(template)
@@ -2444,7 +2466,7 @@ class ReservationFlow:
             ]:
                 return "modify"
 
-        if re.match(r"^RES-\d{8}-\d{4}$", message_normalized):
+        if re.match(r"^RES-\d{8}-[A-Z0-9]{4,8}$", message_normalized):
             return "general"
 
         if re.match(r"^\d{4}-\d{2}-\d{2}$", message_normalized):
@@ -3571,6 +3593,12 @@ class ReservationFlow:
             logging.error(f"Failed to save reservation to sheets: {e}", exc_info=True)
 
         try:
+            self.google_calendar._clear_runtime_caches()
+            self._clear_runtime_cache(user_id)
+        except Exception as e:
+            logging.warning(f"Failed to clear reservation caches after create: {e}")
+
+        try:
             from api.notification_manager import send_reservation_confirmation_notification
             send_reservation_confirmation_notification(reservation_data, client_name)
         except Exception as e:
@@ -3690,6 +3718,12 @@ class ReservationFlow:
                 self.sheets_logger.update_reservation_data(original_reservation_id, field_updates)
             except Exception as e:
                 logging.error(f"Failed to update reservation data in sheets: {e}", exc_info=True)
+
+            try:
+                self.google_calendar._clear_runtime_caches()
+                self._clear_runtime_cache(user_id)
+            except Exception as e:
+                logging.warning(f"Failed to clear reservation caches after modification: {e}")
 
             try:
                 from api.notification_manager import send_reservation_modification_notification
@@ -3865,7 +3899,7 @@ class ReservationFlow:
         try:
             selected_reservation = None
 
-            if re.match(r"^RES-\d{8}-\d{4}$", message):
+            if re.match(r"^RES-\d{8}-[A-Z0-9]{4,8}$", message.strip()):
                 reservation_id = message.strip()
                 for res in reservations:
                     if res["reservation_id"] == reservation_id:
@@ -3885,7 +3919,7 @@ class ReservationFlow:
             else:
                 return (
                     f"申し訳ございませんが、正しい形式で入力してください。\n"
-                    f"番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXX）を入力してください。\n\n"
+                    f"番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXXXX）を入力してください。\n\n"
                     f"変更をやめる場合は「やめる」とお送りください。"
                 )
 
@@ -4091,7 +4125,7 @@ class ReservationFlow:
         reservations = state["user_reservations"]
 
         try:
-            if re.match(r"^RES-\d{8}-\d{4}$", message):
+            if re.match(r"^RES-\d{8}-[A-Z0-9]{4,8}$", message.strip()):
                 reservation_id = message.strip()
                 selected_reservation = None
                 for res in reservations:
@@ -4164,7 +4198,7 @@ class ReservationFlow:
                 else:
                     return f"申し訳ございませんが、その番号は選択できません。\n1から{len(reservations)}の番号を入力してください。"
             else:
-                return f"申し訳ございませんが、正しい形式で入力してください。\n番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXX）を入力してください。"
+                return f"申し訳ございませんが、正しい形式で入力してください。\n番号（1-{len(reservations)}）または予約ID（RES-YYYYMMDD-XXXXXX）を入力してください。"
 
         except Exception as e:
             logging.error(f"Reservation selection for cancellation failed: {e}")
@@ -4230,6 +4264,12 @@ class ReservationFlow:
                 logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
 
             try:
+                self.google_calendar._clear_runtime_caches()
+                self._clear_runtime_cache(user_id)
+            except Exception as e:
+                logging.warning(f"Failed to clear reservation caches after cancellation: {e}")
+
+            try:
                 from api.notification_manager import send_reservation_cancellation_notification
 
                 client_name = self._get_line_display_name(user_id)
@@ -4261,6 +4301,12 @@ class ReservationFlow:
 
             if not calendar_success:
                 logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
+
+            try:
+                self.google_calendar._clear_runtime_caches()
+                self._clear_runtime_cache(user_id)
+            except Exception as e:
+                logging.warning(f"Failed to clear reservation caches after ID cancellation: {e}")
 
             fallback_text = """✅キャンセルが完了しました。
 
