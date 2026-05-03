@@ -49,6 +49,7 @@ class ReservationFlow:
 
         self.back_label = "← 戻る"
         self._config_mtime = self._get_config_mtime()
+        self.messages_data = self._load_messages_data()
 
 
     def _ensure_runtime_cache(self, user_id: Optional[str]) -> Dict[str, Any]:
@@ -294,6 +295,200 @@ class ReservationFlow:
     def _config_path(self) -> str:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(current_dir, "data", "config.json")
+
+    def _messages_path(self) -> str:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(current_dir, "data", "messages.json")
+
+    def _load_messages_data(self) -> Dict[str, Any]:
+        """
+        Load reservation message templates from api/data/messages.json.
+
+        This must never stop the app. If the file is missing, broken, or has
+        an unexpected shape, message lookup simply falls back to existing
+        hard-coded copy.
+        """
+        try:
+            with open(self._messages_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logging.warning("messages.json root must be an object. Using empty messages data.")
+                return {}
+            return data
+        except FileNotFoundError:
+            logging.info("messages.json not found. Using code-side fallback messages.")
+            return {}
+        except json.JSONDecodeError as e:
+            logging.warning(f"messages.json is invalid JSON. Using fallback messages. error={e}")
+            return {}
+        except Exception as e:
+            logging.warning(f"Failed to load messages.json. Using fallback messages. error={e}")
+            return {}
+
+    def _get_message_template(self, scene: str, variant: str = "default") -> str:
+        """
+        Get reservation message template by scene + variant.
+
+        Priority:
+          1. reservation_messages[scene][variant]
+          2. reservation_messages[scene][default]
+          3. empty string
+        """
+        try:
+            messages_root = self.messages_data.get("reservation_messages", {})
+            if not isinstance(messages_root, dict):
+                return ""
+
+            scene_messages = messages_root.get(scene, {})
+            if not isinstance(scene_messages, dict):
+                return ""
+
+            template = scene_messages.get(variant)
+            if isinstance(template, str) and template != "":
+                return template
+
+            default_template = scene_messages.get("default")
+            if isinstance(default_template, str):
+                return default_template
+
+            return ""
+        except Exception as e:
+            logging.warning(f"Failed to get message template. scene={scene}, variant={variant}, error={e}")
+            return ""
+
+    def _render_message(self, template: str, params: Dict[str, Any]) -> str:
+        """
+        Render {key} placeholders safely.
+
+        Missing keys are replaced with an empty string so message rendering
+        never raises KeyError during the reservation flow.
+        """
+        if not template:
+            return ""
+
+        safe_params = params or {}
+
+        def replace_placeholder(match):
+            key = match.group(1)
+            value = safe_params.get(key, "")
+            if value is None:
+                return ""
+            return str(value)
+
+        try:
+            return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", replace_placeholder, str(template))
+        except Exception as e:
+            logging.warning(f"Failed to render message template. error={e}")
+            return str(template)
+
+    def _message_variant_exists(self, scene: str, variant: str) -> bool:
+        try:
+            messages_root = self.messages_data.get("reservation_messages", {})
+            scene_messages = messages_root.get(scene, {}) if isinstance(messages_root, dict) else {}
+            return isinstance(scene_messages, dict) and isinstance(scene_messages.get(variant), str) and scene_messages.get(variant) != ""
+        except Exception:
+            return False
+
+    def _select_message_variant(self, scene: str, context: Dict[str, Any]) -> str:
+        """
+        Select message variant for future sales-oriented copy switching.
+
+        Phase 2-1 keeps the logic intentionally small, but the method already
+        accepts scene/context so A/B tests, seasonality, and tenant-specific
+        logic can be added later without changing call sites.
+        """
+        context = context or {}
+
+        candidates: List[str] = []
+        if scene == "date_selection":
+            if context.get("is_same_day"):
+                candidates.append("same_day")
+            if context.get("is_weekend"):
+                candidates.append("weekend_push")
+            else:
+                candidates.append("weekday_push")
+
+        if scene == "staff_selection" and context.get("can_select_no_preference_staff"):
+            candidates.append("no_preference_push")
+
+        if scene == "confirmation" and context.get("is_high_value"):
+            candidates.append("high_value")
+
+        if scene == "time_selection" and context.get("has_recommended_slot"):
+            candidates.append("recommended_slot")
+
+        for candidate in candidates:
+            if self._message_variant_exists(scene, candidate):
+                return candidate
+
+        return "default"
+
+    def _build_message_context(self, user_id: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        data: Dict[str, Any] = {}
+        if user_id and user_id in self.user_states:
+            state_data = self.user_states[user_id].get("data", {})
+            if isinstance(state_data, dict):
+                data.update(state_data)
+
+        if extra:
+            data.update(extra)
+
+        selected_date = data.get("date")
+        if selected_date:
+            try:
+                date_obj = datetime.strptime(str(selected_date), "%Y-%m-%d").date()
+                data["is_weekend"] = date_obj.weekday() >= 5
+                data["is_same_day"] = date_obj == datetime.now().date()
+            except Exception:
+                data.setdefault("is_weekend", False)
+                data.setdefault("is_same_day", False)
+        else:
+            data.setdefault("is_weekend", False)
+            data.setdefault("is_same_day", False)
+
+        staff = data.get("staff")
+        data["is_no_preference_staff"] = self._is_no_preference_staff(staff) if hasattr(self, "_is_no_preference_staff") else False
+
+        total_price = data.get("total_price", data.get("price", 0))
+        try:
+            total_price_int = int(total_price or 0)
+        except Exception:
+            total_price_int = 0
+
+        data["total_price"] = total_price_int
+        data["price"] = f"{total_price_int:,}"
+        data["is_high_value"] = total_price_int >= 15000
+
+        if data.get("service") is None and data.get("services"):
+            services = data.get("services")
+            if isinstance(services, list):
+                data["service"] = " / ".join(
+                    str(item.get("service_name", ""))
+                    for item in services
+                    if isinstance(item, dict) and item.get("service_name")
+                )
+
+        if data.get("staff") is None:
+            data["staff"] = ""
+        if data.get("service") is None:
+            data["service"] = ""
+
+        return data
+
+    def _get_reservation_message(
+        self,
+        scene: str,
+        context: Optional[Dict[str, Any]] = None,
+        fallback: str = "",
+        variant: Optional[str] = None,
+    ) -> str:
+        context = context or {}
+        selected_variant = variant or self._select_message_variant(scene, context)
+        template = self._get_message_template(scene, selected_variant)
+        if not template:
+            template = fallback
+        rendered = self._render_message(template, context)
+        return rendered if rendered else fallback
 
     def _load_config_data(self) -> Dict[str, Any]:
         try:
@@ -873,8 +1068,14 @@ class ReservationFlow:
         return matched
 
     def _build_initial_menu_selection_message(self) -> Dict[str, Any]:
+        context = self._build_message_context()
+        initial_text = self._get_reservation_message(
+            "initial_menu",
+            context,
+            fallback="ご希望のメニューをお選びください👇",
+        )
         lines = [
-            "ご希望のメニューをお選びください👇",
+            initial_text,
             "",
             "【人気セットメニュー】",
         ]
@@ -902,7 +1103,12 @@ class ReservationFlow:
         lines = []
         if prefix:
             lines.extend([prefix, ""])
-        lines.append("ご希望のメニューカテゴリをお選びください👇")
+        category_text = self._get_reservation_message(
+            "category_selection",
+            self._build_message_context(),
+            fallback="ご希望のメニューカテゴリをお選びください👇",
+        )
+        lines.append(category_text)
         lines.append("")
         items = []
         for category in self._get_service_categories():
@@ -1091,7 +1297,14 @@ class ReservationFlow:
         if not cart:
             return "選択中のメニューがありません。\nご希望のメニューをお選びください👇"
 
-        lines = [prefix, ""]
+        context = self._build_message_context(user_id, {
+            "cart_items_count": len(cart),
+            "total_price": self._get_cart_total_price(user_id),
+            "total_duration": self._get_cart_total_duration(user_id),
+            "service": self._format_service_summary(cart),
+        })
+        summary_intro = self._get_reservation_message("cart_summary", context, fallback=prefix)
+        lines = [summary_intro, ""]
         for item in cart:
             lines.append(f"・{item.get('service_name', '')}")
         lines.extend([
@@ -1825,9 +2038,18 @@ class ReservationFlow:
 
         example_date = (datetime.now().date() + timedelta(days=7)).strftime("%Y-%m-%d")
 
-        header = "📅 ご希望の日付をお選びください👇\n\n"
-        header += "※土日・午前中は埋まりやすいためお早めのご予約がおすすめです！\n\n"
-        header += f"※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
+        fallback_header = "📅 ご希望の日付をお選びください👇\n\n"
+        fallback_header += "※土日・午前中は埋まりやすいためお早めのご予約がおすすめです！\n\n"
+        fallback_header += f"※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
+
+        context_data = self._build_message_context(user_id, {
+            "limit_days": limit_days,
+            "example_date": example_date,
+            "week_start": ws.strftime("%Y-%m-%d"),
+            "has_weekend_in_week": any(datetime.strptime(ds, "%Y-%m-%d").date().weekday() >= 5 for ds in bookable),
+        })
+        context_data["is_weekend"] = bool(context_data.get("has_weekend_in_week"))
+        header = self._get_reservation_message("date_selection", context_data, fallback=fallback_header)
 
         text = (f"{error_prefix}\n\n" if error_prefix else "") + header
         return self._quick_reply_return(
@@ -1860,9 +2082,20 @@ class ReservationFlow:
             staff_items.append({"label": staff_name, "text": staff_name})
             staff_lines.append(f"・{staff_name}")
 
+        context_data = self._build_message_context(user_id, {
+            "service": service_name,
+            "can_select_no_preference_staff": True,
+            "staff_options": chr(10).join(staff_lines),
+        })
+        staff_header = self._get_reservation_message(
+            "staff_selection",
+            context_data,
+            fallback="担当スタッフをお選びください👇",
+        )
+
         text = f"""{service_name}承ります👌
 
-担当スタッフをお選びください👇
+{staff_header}
 
 {chr(10).join(staff_lines)}"""
 
@@ -2963,7 +3196,16 @@ class ReservationFlow:
         staff_display = "指名なし（担当は自動で決定）" if self._is_no_preference_staff(staff) else staff
         price_val = self._get_cart_total_price(user_id)
 
-        text = f"""ご予約内容の確認です😊
+        context_data = self._build_message_context(user_id, {
+            "date": selected_date,
+            "start_time": start_time,
+            "end_time": end_time,
+            "service": service,
+            "staff": staff_display,
+            "total_price": price_val,
+            "price": f"{price_val:,}",
+        })
+        fallback_text = f"""ご予約内容の確認です😊
 
 日時：{selected_date} {start_time}~{end_time}
 メニュー：{service}
@@ -2971,6 +3213,7 @@ class ReservationFlow:
 料金：{price_val:,}円
 
 この内容で予約を確定しますか？"""
+        text = self._get_reservation_message("confirmation", context_data, fallback=fallback_text)
         return self._quick_reply_return(
             text,
             [{"label": "確定", "text": "確定"}],
@@ -3213,13 +3456,23 @@ class ReservationFlow:
         if user_id in self.user_states:
             del self.user_states[user_id]
 
-        return f"""ご予約が確定しました😊
+        context_data = self._build_message_context(user_id, {
+            "date": reservation_data["date"],
+            "start_time": reservation_data.get("start_time", reservation_data.get("time", "")),
+            "end_time": reservation_data.get("end_time", ""),
+            "service": reservation_data["service"],
+            "staff": assigned_staff,
+            "total_price": reservation_data.get("total_price", 0),
+            "price": f"{int(reservation_data.get('total_price', 0) or 0):,}",
+        })
+        fallback_text = f"""ご予約が確定しました😊
 
 日時：{reservation_data['date']} {reservation_data.get('start_time', reservation_data.get('time', ''))}~{reservation_data.get('end_time', '')}
 メニュー：{reservation_data['service']}
 担当スタッフ：{assigned_staff}
 
 ご来店を心よりお待ちしております。"""
+        return self._get_reservation_message("reservation_complete", context_data, fallback=fallback_text)
 
     def _execute_reservation_modification(self, user_id: str) -> str:
         try:
@@ -3337,13 +3590,23 @@ class ReservationFlow:
             if user_id in self.user_states:
                 del self.user_states[user_id]
 
-            return f"""予約変更が完了しました😊
+            context_data = self._build_message_context(user_id, {
+                "date": new_data["date"],
+                "start_time": new_data.get("start_time", new_data.get("time", "")),
+                "end_time": new_data.get("end_time", ""),
+                "service": new_data["service"],
+                "staff": assigned_staff,
+                "total_price": new_data.get("total_price", 0),
+                "price": f"{int(new_data.get('total_price', 0) or 0):,}",
+            })
+            fallback_text = f"""予約変更が完了しました😊
 
 日時：{new_data['date']} {new_data.get('start_time', new_data.get('time', ''))}~{new_data.get('end_time', '')}
 メニュー：{new_data['service']}
 担当スタッフ：{assigned_staff}
 
 ご来店を心よりお待ちしております。"""
+            return self._get_reservation_message("modification", context_data, fallback=fallback_text)
 
         except Exception as e:
             logging.error(f"Reservation modification execution failed: {e}", exc_info=True)
@@ -3851,9 +4114,11 @@ class ReservationFlow:
 
             del self.user_states[user_id]
 
-            return """✅キャンセルが完了しました。
+            fallback_text = """✅キャンセルが完了しました。
 
 ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
+            context_data = self._build_message_context(user_id, reservation if isinstance(reservation, dict) else {})
+            return self._get_reservation_message("cancellation_complete", context_data, fallback=fallback_text)
 
         except Exception as e:
             logging.error(f"Reservation cancellation execution failed: {e}")
@@ -3872,9 +4137,10 @@ class ReservationFlow:
             if not calendar_success:
                 logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
 
-            return """✅キャンセルが完了しました。
+            fallback_text = """✅キャンセルが完了しました。
 
 ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
+            return self._get_reservation_message("cancellation_complete", self._build_message_context(user_id), fallback=fallback_text)
 
         except Exception as e:
             logging.error(f"Reservation ID cancellation failed: {e}")
