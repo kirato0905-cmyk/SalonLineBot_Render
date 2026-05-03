@@ -3,6 +3,7 @@ Unified notification manager for salon booking system.
 
 Operator notifications are intentionally unified to Slack only.
 LINE operator notifications are no longer initialized or sent from this manager.
+Reminder delivery result notifications are disabled by specification.
 """
 import logging
 from typing import Dict, Any, List
@@ -78,8 +79,11 @@ class NotificationManager:
         total_count: int,
         failed_reservations: List[Dict[str, Any]],
     ) -> bool:
-        """Reminder operator notification is disabled; keep no-op for compatibility."""
-        logging.info("Reminder manager notification is disabled.")
+        """Reminder delivery result operator notification is disabled by specification."""
+        logging.info(
+            "Reminder status operator notification is disabled. "
+            f"success={success_count}, total={total_count}, failed={len(failed_reservations)}"
+        )
         return True
 
 
