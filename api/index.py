@@ -89,14 +89,27 @@ CONSENT_MESSAGE_TEXTS = {
 def set_phone_input_waiting(user_id: str) -> None:
     with _PHONE_INPUT_LOCK:
         _PHONE_INPUT_WAITING_USERS.add(user_id)
+    try:
+        get_sheets_logger().set_user_input_state(user_id, "電話番号入力待ち")
+    except Exception as e:
+        logging.warning(f"Could not persist phone input waiting state for {user_id}: {e}")
 
 
 def clear_phone_input_waiting(user_id: str) -> None:
     with _PHONE_INPUT_LOCK:
         _PHONE_INPUT_WAITING_USERS.discard(user_id)
+    try:
+        get_sheets_logger().set_user_input_state(user_id, "利用可能")
+    except Exception as e:
+        logging.warning(f"Could not clear persisted phone input waiting state for {user_id}: {e}")
 
 
 def is_phone_input_waiting(user_id: str) -> bool:
+    try:
+        if get_sheets_logger().is_user_waiting_for_phone_input(user_id):
+            return True
+    except Exception as e:
+        logging.warning(f"Could not read persisted phone input waiting state for {user_id}: {e}")
     with _PHONE_INPUT_LOCK:
         return user_id in _PHONE_INPUT_WAITING_USERS
 
@@ -201,7 +214,7 @@ def handle_phone_number_input(user_id: str, user_name: str, message_text: str, r
 
         clear_phone_input_waiting(user_id)
         reply_text(reply_token, build_welcome_after_phone_message())
-        print(f"User phone number registered: {user_id} ({user_name})")
+        logging.info(f"User phone number registered: {user_id} ({user_name})")
     except Exception as e:
         logging.error(f"Failed to handle phone number input: {e}", exc_info=True)
         try:
