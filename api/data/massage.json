@@ -18,11 +18,14 @@
       "default": "📅 ご希望の日付をお選びください👇\n\n※{reservation_hint}\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
       "weekend_push": "📅 ご希望の日付をお選びください👇\n\n※土日・午前中は特に埋まりやすいため、早めのご予約がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
       "weekday_push": "📅 ご希望の日付をお選びください👇\n\n※平日は比較的ご案内しやすい時間帯もございます。ご都合のよい日をお選びください。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
-      "same_day": "📅 本日予約ですね。ご案内できる日付をお選びください👇\n\n※直前枠は埋まりやすいため、お早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
+      "same_day": "📅 本日予約ですね。ご案内できる日付をお選びください👇\n\n※直前枠は埋まりやすいため、お早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
+      "near_term_push": "📅 直近でご案内できる日付があります👇\n\n※近い日程は埋まりやすいため、ご希望に合う場合はお早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
     },
     "time_selection": {
       "default": "{date}ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇",
-      "recommended_slot": "{date}ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\nおすすめ枠から選ぶと、スムーズにご案内できます👇\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇"
+      "recommended_slot": "{date}ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\nおすすめ枠から選ぶと、スムーズにご案内できます👇\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇",
+      "same_day": "{date}の本日枠ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\n直前枠は埋まりやすいため、ご希望の時間があればお早めの確定がおすすめです。\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇",
+      "easy_slot": "{date}ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\n比較的ご案内しやすい枠がございます👇\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇"
     },
     "confirmation": {
       "default": "ご予約内容はこちらです😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当：{staff}\n料金：{price}円\n\nこの内容で予約を確定しますか？",
