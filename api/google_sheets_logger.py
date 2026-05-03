@@ -66,6 +66,7 @@ class GoogleSheetsLogger:
         "ステータス",
         "同意有無",
         "同意日時",
+        "入力状態",
     ]
 
     TODAY_RESERVATION_HEADERS = [
@@ -139,6 +140,9 @@ class GoogleSheetsLogger:
         "consented": "同意有無",
         "Consent Date": "同意日時",
         "consent_date": "同意日時",
+        "Input State": "入力状態",
+        "input_state": "入力状態",
+        "phone_input_state": "入力状態",
     }
 
     SHEET_STATUS_MAP = {
@@ -291,13 +295,16 @@ class GoogleSheetsLogger:
             if not spreadsheet:
                 return
 
+            auto_migrate = os.getenv("AUTO_MIGRATE_SHEETS", "false").lower() == "true"
+            refresh_today_on_startup = os.getenv("REFRESH_TODAY_RESERVATIONS_ON_STARTUP", "false").lower() == "true"
+
             self.reservations_worksheet = self._get_or_create_worksheet(
                 title=self.RESERVATIONS_SHEET_TITLE,
                 legacy_title=self.LEGACY_RESERVATIONS_SHEET_TITLE,
                 rows=1000,
                 cols=len(self.RESERVATION_HEADERS),
                 headers=self.RESERVATION_HEADERS,
-                migrate=True,
+                migrate=auto_migrate,
             )
             self.users_worksheet = self._get_or_create_worksheet(
                 title=self.USERS_SHEET_TITLE,
@@ -305,7 +312,7 @@ class GoogleSheetsLogger:
                 rows=1000,
                 cols=len(self.USER_HEADERS),
                 headers=self.USER_HEADERS,
-                migrate=True,
+                migrate=auto_migrate,
             )
             self.today_reservations_worksheet = self._get_or_create_worksheet(
                 title=self.TODAY_RESERVATIONS_SHEET_TITLE,
@@ -313,11 +320,12 @@ class GoogleSheetsLogger:
                 rows=200,
                 cols=len(self.TODAY_RESERVATION_HEADERS),
                 headers=self.TODAY_RESERVATION_HEADERS,
-                migrate=True,
+                migrate=auto_migrate,
             )
-            self.refresh_today_reservations()
-            print("Google Sheets logger initialized successfully")
-            print("予約一覧 / ユーザー一覧 / 今日の予約: active")
+            if refresh_today_on_startup:
+                self.refresh_today_reservations()
+            logging.info("Google Sheets logger initialized successfully")
+            logging.info("予約一覧 / ユーザー一覧 / 今日の予約: active")
         except Exception as e:
             logging.error(f"Failed to setup Google Sheets connection: {e}")
             self.reservations_worksheet = None
@@ -342,8 +350,8 @@ class GoogleSheetsLogger:
         try:
             worksheet = spreadsheet.worksheet(title)
             self._ensure_headers(worksheet, headers, migrate=migrate)
-            # 旧英語シートが別で残っている場合、未移行データを日本語シートへ取り込む
-            if legacy_title:
+            # 旧英語シートが別で残っている場合、明示移行時だけ未移行データを日本語シートへ取り込む
+            if migrate and legacy_title:
                 self._merge_legacy_sheet_if_exists(legacy_title, worksheet)
             return worksheet
         except gspread.WorksheetNotFound:
@@ -352,13 +360,13 @@ class GoogleSheetsLogger:
             logging.error(f"Failed to get worksheet '{title}': {e}")
             return None
 
-        # 日本語シートがない場合は旧英語シートをリネームして使う
-        if legacy_title:
+        # 日本語シートがない場合は、明示移行時だけ旧英語シートをリネームして使う
+        if migrate and legacy_title:
             try:
                 legacy_worksheet = spreadsheet.worksheet(legacy_title)
                 try:
                     legacy_worksheet.update_title(title)
-                    print(f"Renamed worksheet: {legacy_title} -> {title}")
+                    logging.info(f"Renamed worksheet: {legacy_title} -> {title}")
                     self._ensure_headers(legacy_worksheet, headers, migrate=migrate)
                     return legacy_worksheet
                 except Exception as e:
@@ -383,7 +391,7 @@ class GoogleSheetsLogger:
                 [headers],
                 value_input_option="USER_ENTERED",
             )
-            print(f"Created new worksheet: {title}")
+            logging.info(f"Created new worksheet: {title}")
             return worksheet
         except Exception as e:
             logging.error(f"Failed to create worksheet '{title}': {e}")
@@ -404,7 +412,11 @@ class GoogleSheetsLogger:
             if actual_headers == expected_headers:
                 return True
 
-            logging.warning(f"Header mismatch detected in worksheet '{worksheet.title}'. Updating headers.")
+            logging.warning(f"Header mismatch detected in worksheet '{worksheet.title}'.")
+            if not migrate:
+                logging.warning("AUTO_MIGRATE_SHEETS is false. Headers were not modified automatically.")
+                return False
+            logging.warning(f"Migrating/updating headers in worksheet '{worksheet.title}'.")
             if migrate and worksheet.title in {self.RESERVATIONS_SHEET_TITLE, self.LEGACY_RESERVATIONS_SHEET_TITLE}:
                 self._migrate_sheet_headers(worksheet, actual_headers, expected_headers, self._normalize_legacy_reservation_record, self._record_to_row)
             elif migrate and worksheet.title in {self.USERS_SHEET_TITLE, self.LEGACY_USERS_SHEET_TITLE}:
@@ -448,7 +460,7 @@ class GoogleSheetsLogger:
                     migrated_rows,
                     value_input_option="USER_ENTERED",
                 )
-            print(f"Migrated worksheet '{worksheet.title}'. rows={len(migrated_rows)}")
+            logging.info(f"Migrated worksheet '{worksheet.title}'. rows={len(migrated_rows)}")
         except Exception as e:
             logging.error(f"Failed to migrate worksheet '{worksheet.title}': {e}")
             worksheet.update(
@@ -920,6 +932,7 @@ class GoogleSheetsLogger:
             "ステータス": self._to_sheet_user_status(pick("ステータス", "Status", default="Active")),
             "同意有無": self._to_sheet_consent(pick("同意有無", "Consented", default="No")),
             "同意日時": pick("同意日時", "Consent Date"),
+            "入力状態": pick("入力状態", "Input State", "input_state"),
         }
 
     def _normalize_legacy_reservation_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
@@ -978,6 +991,8 @@ class GoogleSheetsLogger:
             "Status": user.get("ステータス", ""),
             "Consented": "Yes" if self._has_consented_value(user.get("同意有無")) else "No",
             "Consent Date": user.get("同意日時", ""),
+            "Input State": user.get("入力状態", ""),
+            "input_state": user.get("入力状態", ""),
         })
         return enriched
 
@@ -1276,6 +1291,7 @@ class GoogleSheetsLogger:
                 "ステータス": "有効",
                 "同意有無": "いいえ",
                 "同意日時": "",
+                "入力状態": "",
             }
             ws.append_row(self._user_record_to_row(record), value_input_option="RAW")
             self._invalidate_cache("users_records")
@@ -1319,6 +1335,7 @@ class GoogleSheetsLogger:
                 return False
             updated = dict(record)
             updated["電話番号"] = normalized_phone
+            updated["入力状態"] = "利用可能"
             end_col = self._column_number_to_letter(len(self.USER_HEADERS))
             ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
             try:
@@ -1385,6 +1402,10 @@ class GoogleSheetsLogger:
             updated = dict(record)
             updated["同意有無"] = "はい" if consented else "いいえ"
             updated["同意日時"] = self._get_tokyo_timestamp() if consented else ""
+            if consented:
+                updated["入力状態"] = "利用可能" if updated.get("電話番号") else "電話番号入力待ち"
+            else:
+                updated["入力状態"] = ""
             end_col = self._column_number_to_letter(len(self.USER_HEADERS))
             ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
             self._invalidate_cache("users_records")
@@ -1392,6 +1413,40 @@ class GoogleSheetsLogger:
         except Exception as e:
             logging.error(f"Error setting consent for user {user_id}: {e}")
             return False
+
+
+    def get_user_input_state(self, user_id: str) -> str:
+        try:
+            _, record = self._find_user_row(user_id)
+            return str(record.get("入力状態", "")).strip() if record else ""
+        except Exception as e:
+            logging.error(f"Error getting user input state for {user_id}: {e}")
+            return ""
+
+    def set_user_input_state(self, user_id: str, input_state: str) -> bool:
+        ws = self._get_users_worksheet()
+        if not ws:
+            return False
+        try:
+            row_index, record = self._find_user_row(user_id)
+            if not row_index or not record:
+                if not self.log_new_user(user_id=user_id, display_name="Unknown", phone_number=""):
+                    return False
+                row_index, record = self._find_user_row(user_id)
+                if not row_index or not record:
+                    return False
+            updated = dict(record)
+            updated["入力状態"] = str(input_state or "").strip()
+            end_col = self._column_number_to_letter(len(self.USER_HEADERS))
+            ws.update(f"A{row_index}:{end_col}{row_index}", [self._user_record_to_row(updated)], value_input_option="RAW")
+            self._invalidate_cache("users_records")
+            return True
+        except Exception as e:
+            logging.error(f"Error setting user input state for {user_id}: {e}")
+            return False
+
+    def is_user_waiting_for_phone_input(self, user_id: str) -> bool:
+        return self.get_user_input_state(user_id) == "電話番号入力待ち"
 
     def mark_user_seen(self, user_id: str) -> bool:
         return True
@@ -1414,5 +1469,6 @@ def get_sheets_logger() -> GoogleSheetsLogger:
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
     return _sheets_logger_instance
+
 
 
