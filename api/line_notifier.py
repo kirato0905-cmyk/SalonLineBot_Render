@@ -1,6 +1,10 @@
 """
-LINE notification service for salon booking system
-config.json integrated version
+Deprecated operator LINE notification service.
+
+Do not use this module for operator notifications.
+Customer-facing reservation reminders are handled by reminder_system.py.
+Operator reservation notifications are handled by notification_manager.py and Slack.
+This file is kept only for backward compatibility during migration.
 """
 import os
 import json
