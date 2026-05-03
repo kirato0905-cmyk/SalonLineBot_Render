@@ -1,24 +1,24 @@
 {
   "reservation_messages": {
     "initial_menu": {
-      "default": "ご希望のメニューをお選びください👇\n\n【人気セットメニュー】\n{featured_sets}\n\n【その他】\n・メニューを見る",
-      "featured_sets_emphasis": "人気のセットメニューから選ぶと、迷わずお得にご予約いただけます👇\n\n【人気セットメニュー】\n{featured_sets}\n\n【その他】\n・メニューを見る"
+      "default": "ご希望のメニューをお選びください👇\n\n迷われる場合は、人気のセットメニューがおすすめです。\n単品で選ぶよりスムーズにご予約いただけます。\n\n【人気セットメニュー】\n{featured_sets}\n\n【その他】\n・メニューを見る",
+      "featured_sets_emphasis": "人気のセットメニューから選ぶと、迷わずスムーズにご予約いただけます👇\n\n髪全体を整えたい方には、セットメニューがおすすめです。\n\n【人気セットメニュー】\n{featured_sets}\n\n【その他】\n・メニューを見る"
     },
     "category_selection": {
-      "default": "ご希望のメニューカテゴリをお選びください👇"
+      "default": "ご希望のメニューカテゴリをお選びください👇\n\n迷われる場合は、カット＋カラーなどのセットメニューもおすすめです。"
     },
     "cart_summary": {
-      "default": "現在のご予約内容です。"
+      "default": "現在のご予約内容です。\n\n内容をご確認のうえ、このまま進む場合は「このメニューで確定」をお選びください。"
     },
     "staff_selection": {
       "default": "担当スタッフをお選びください👇",
-      "no_preference_push": "担当スタッフをお選びください👇\n迷われる場合は「指名なし」でも大丈夫です。空き状況に合わせてご案内しやすくなります。"
+      "no_preference_push": "担当スタッフをお選びください👇\n\n迷われる場合は「指名なし」でも大丈夫です。\n空き状況に合わせてご案内しやすくなるため、早めに予約を確定しやすくなります。"
     },
     "date_selection": {
       "default": "📅 ご希望の日付をお選びください👇\n\n※{reservation_hint}\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
-      "weekend_push": "📅 ご希望の日付をお選びください👇\n\n※土日・午前中は特に埋まりやすいため、早めのご予約がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
-      "weekday_push": "📅 ご希望の日付をお選びください👇\n\n※平日は比較的ご案内しやすい時間帯もございます。ご都合のよい日をお選びください。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
-      "same_day": "📅 本日予約ですね。ご案内できる日付をお選びください👇\n\n※直前枠は埋まりやすいため、お早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
+      "weekend_push": "📅 ご希望の日付をお選びください👇\n\n※土日・午前中は特に埋まりやすいため、ご希望の場合は早めのご予約がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
+      "weekday_push": "📅 ご希望の日付をお選びください👇\n\n※平日は比較的ご案内しやすい時間帯もございます。ゆっくり過ごしたい方には平日予約もおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
+      "same_day": "📅 本日予約ですね。ご案内できる日付をお選びください👇\n\n※直前枠は埋まりやすいため、ご都合が合えばお早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
       "near_term_push": "📅 直近でご案内できる日付があります👇\n\n※近い日程は埋まりやすいため、ご希望に合う場合はお早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
     },
     "time_selection": {
@@ -29,11 +29,11 @@
     },
     "confirmation": {
       "default": "ご予約内容はこちらです😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当：{staff}\n料金：{price}円\n\nこの内容で予約を確定しますか？",
-      "high_value": "ご予約内容はこちらです😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当：{staff}\n料金：{price}円\n\nしっかり整えたい方におすすめの内容です。\nこの内容で予約を確定しますか？"
+      "high_value": "ご予約内容はこちらです😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当：{staff}\n料金：{price}円\n\n髪全体をしっかり整えたい方におすすめの内容です。\nこの内容で予約を確定しますか？"
     },
     "reservation_complete": {
       "default": "ご予約が確定しました😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当スタッフ：{staff}\n\nご来店を心よりお待ちしております。",
-      "repeat_push": "ご予約が確定しました😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当スタッフ：{staff}\n\n当日はお気をつけてお越しください。次回のメンテナンス時期もお気軽にご相談ください。"
+      "repeat_push": "ご予約が確定しました😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当スタッフ：{staff}\n\n当日はお気をつけてお越しください。\n次回のメンテナンス時期もお気軽にご相談ください。"
     },
     "modification": {
       "default": "予約変更が完了しました😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当スタッフ：{staff}\n\nご来店を心よりお待ちしております。"
