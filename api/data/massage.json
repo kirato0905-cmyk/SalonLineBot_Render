@@ -1,8 +1,8 @@
 {
   "reservation_messages": {
     "initial_menu": {
-      "default": "ご希望のメニューをお選びください👇",
-      "featured_sets_emphasis": "人気のセットメニューから選ぶと、迷わずお得にご予約いただけます👇"
+      "default": "ご希望のメニューをお選びください👇\n\n【人気セットメニュー】\n{featured_sets}\n\n【その他】\n・メニューを見る",
+      "featured_sets_emphasis": "人気のセットメニューから選ぶと、迷わずお得にご予約いただけます👇\n\n【人気セットメニュー】\n{featured_sets}\n\n【その他】\n・メニューを見る"
     },
     "category_selection": {
       "default": "ご希望のメニューカテゴリをお選びください👇"
@@ -15,14 +15,14 @@
       "no_preference_push": "担当スタッフをお選びください👇\n迷われる場合は「指名なし」でも大丈夫です。空き状況に合わせてご案内しやすくなります。"
     },
     "date_selection": {
-      "default": "📅 ご希望の日付をお選びください👇\n\n※土日・午前中は埋まりやすいためお早めのご予約がおすすめです！\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
+      "default": "📅 ご希望の日付をお選びください👇\n\n※{reservation_hint}\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
       "weekend_push": "📅 ご希望の日付をお選びください👇\n\n※土日・午前中は特に埋まりやすいため、早めのご予約がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
       "weekday_push": "📅 ご希望の日付をお選びください👇\n\n※平日は比較的ご案内しやすい時間帯もございます。ご都合のよい日をお選びください。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。",
       "same_day": "📅 本日予約ですね。ご案内できる日付をお選びください👇\n\n※直前枠は埋まりやすいため、お早めの確定がおすすめです。\n\n※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
     },
     "time_selection": {
-      "default": "ご希望の時間をお選びください👇",
-      "recommended_slot": "おすすめ枠から選ぶと、スムーズにご案内できます👇"
+      "default": "{date}ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇",
+      "recommended_slot": "{date}ですね👌\n\n{service}（{duration}分）の空き状況はこちら。\n\nおすすめ枠から選ぶと、スムーズにご案内できます👇\n\n{recommended_section}{other_section}ご希望の時間をお選びください👇"
     },
     "confirmation": {
       "default": "ご予約内容はこちらです😊\n\n日時：{date} {start_time}~{end_time}\nメニュー：{service}\n担当：{staff}\n料金：{price}円\n\nこの内容で予約を確定しますか？",
