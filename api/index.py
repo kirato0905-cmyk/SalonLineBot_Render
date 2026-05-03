@@ -78,6 +78,14 @@ _PHONE_INPUT_WAITING_USERS = set()
 _PHONE_INPUT_LOCK = threading.Lock()
 
 
+CONSENT_MESSAGE_TEXTS = {
+    "同意画面を開く",
+    "同意する",
+    "同意しない",
+    "詳細を見る",
+}
+
+
 def set_phone_input_waiting(user_id: str) -> None:
     with _PHONE_INPUT_LOCK:
         _PHONE_INPUT_WAITING_USERS.add(user_id)
@@ -297,22 +305,24 @@ def handle_message(event: MessageEvent):
 
     # Check consent (except for consent-related messages / phone input after consent)
     if (
-        message_text not in ["同意画面を開く", "同意する", "同意しない", "よくある質問"]
+        message_text not in CONSENT_MESSAGE_TEXTS
+        and message_text != "よくある質問"
         and not is_phone_input_waiting(user_id)
     ):
         try:
             if not user_consent_manager.has_user_consented(user_id):
                 user_name = get_cached_display_name(user_id)
-                consent_reminder = f"""🔒 プライバシー同意が必要です
+                consent_reminder = f"""🔒 ご利用前の確認が必要です
 
-{user_name}さん、ボットをご利用いただくには、まず利用規約とプライバシーポリシーにご同意いただく必要があります。
+{user_name}さん、ボットをご利用いただくには、はじめに利用案内をご確認いただく必要があります。
 
-以下のボタンをタップして、同意画面をご確認ください。"""
+長い説明ではなく、まずは大切なポイントだけ確認できます。
+以下のボタンからお進みください。"""
 
                 consent_button = TemplateMessage(
-                    alt_text="利用規約に同意してください",
+                    alt_text="利用案内をご確認ください",
                     template=ButtonsTemplate(
-                        text="利用規約に同意してください",
+                        text="ご予約の前に、利用案内の確認をお願いします。",
                         actions=[
                             MessageAction(
                                 label="同意画面を開く",
@@ -340,7 +350,7 @@ def handle_message(event: MessageEvent):
     # 同意済みでも電話番号が未登録なら、通常メニュー/FAQ/予約より先に電話番号登録へ誘導する。
     # サーバー再起動などで _PHONE_INPUT_WAITING_USERS が消えても、電話番号取得フローが消えない。
     if (
-        message_text not in ["同意画面を開く", "同意する", "同意しない"]
+        message_text not in CONSENT_MESSAGE_TEXTS
         and not is_phone_input_waiting(user_id)
     ):
         try:
@@ -356,6 +366,11 @@ def handle_message(event: MessageEvent):
         if message_text == "同意画面を開く":
             user_name = get_cached_display_name(user_id)
             return handle_consent_screen(user_id, user_name, event.reply_token)
+
+        elif message_text == "詳細を見る":
+            user_name = get_cached_display_name(user_id)
+            return handle_consent_detail(user_id, user_name, event.reply_token)
+
         elif message_text in ["同意する", "同意しない"]:
             user_name = get_cached_display_name(user_id)
             return handle_consent_response(user_id, user_name, message_text, event.reply_token)
@@ -537,37 +552,43 @@ def handle_postback(event: PostbackEvent):
     postback_data = event.postback.data or ""
     params = parse_qs(postback_data)
     action = params.get("action", [None])[0]
-    reply_text = ""
+    reply_text_value = ""
 
     user_name = get_cached_display_name(user_id)
+
+    if action == "view_consent_detail":
+        return handle_consent_detail(user_id, user_name, event.reply_token)
 
     if action == "select_service":
         service_id = params.get("service_id", [None])[0]
         if reservation_flow:
             try:
-                reply_text = reservation_flow.start_reservation_with_service(user_id, service_id)
+                reply_text_value = reservation_flow.start_reservation_with_service(user_id, service_id)
             except Exception as e:
                 logging.error(f"Failed to start reservation from postback: {e}", exc_info=True)
-                reply_text = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
+                reply_text_value = "申し訳ございませんが、メニューの処理中にエラーが発生しました。"
         else:
-            reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
+            reply_text_value = "申し訳ございませんが、現在予約システムを利用できません。"
+
     elif action == "select_featured_set":
         set_id = params.get("set_id", [None])[0]
         if reservation_flow:
             try:
-                reply_text = reservation_flow.start_reservation_with_featured_set(user_id, set_id)
+                reply_text_value = reservation_flow.start_reservation_with_featured_set(user_id, set_id)
             except Exception as e:
                 logging.error(f"Failed to start reservation from featured set postback: {e}", exc_info=True)
-                reply_text = "申し訳ございませんが、セットメニューの処理中にエラーが発生しました。"
+                reply_text_value = "申し訳ございませんが、セットメニューの処理中にエラーが発生しました。"
         else:
-            reply_text = "申し訳ございませんが、現在予約システムを利用できません。"
+            reply_text_value = "申し訳ございませんが、現在予約システムを利用できません。"
+
     elif action in {"view_single_menu", "view_single_menu_categories"}:
         try:
             send_single_menu_categories(event.reply_token, configuration)
             return
         except Exception as e:
             logging.error(f"Failed to open single menu categories from postback: {e}", exc_info=True)
-            reply_text = "申し訳ございませんが、メニューカテゴリの表示中にエラーが発生しました。"
+            reply_text_value = "申し訳ございませんが、メニューカテゴリの表示中にエラーが発生しました。"
+
     elif action == "view_single_menu_category":
         category_id = params.get("category_id", [None])[0]
         try:
@@ -575,15 +596,16 @@ def handle_postback(event: PostbackEvent):
             return
         except Exception as e:
             logging.error(f"Failed to open single menu list from postback: {e}", exc_info=True)
-            reply_text = "申し訳ございませんが、メニュー一覧の表示中にエラーが発生しました。"
-    else:
-        reply_text = "選択内容を処理できませんでした。"
+            reply_text_value = "申し訳ございませんが、メニュー一覧の表示中にエラーが発生しました。"
 
-    if isinstance(reply_text, dict) and "text" in reply_text:
-        reply_body = reply_text["text"]
-        quick_reply_items = reply_text.get("quick_reply_items") or []
     else:
-        reply_body = reply_text if isinstance(reply_text, str) else str(reply_text)
+        reply_text_value = "選択内容を処理できませんでした。"
+
+    if isinstance(reply_text_value, dict) and "text" in reply_text_value:
+        reply_body = reply_text_value["text"]
+        quick_reply_items = reply_text_value.get("quick_reply_items") or []
+    else:
+        reply_body = reply_text_value if isinstance(reply_text_value, str) else str(reply_text_value)
         quick_reply_items = []
 
     try:
@@ -614,9 +636,7 @@ def handle_postback(event: PostbackEvent):
 def handle_follow(event: FollowEvent):
     """Handle when a user adds the bot as a friend"""
     user_id = event.source.user_id
-
     user_name = get_cached_display_name(user_id)
-
 
     try:
         sheets_logger = get_sheets_logger()
@@ -631,10 +651,17 @@ def handle_follow(event: FollowEvent):
         logging.error(f"Failed to save user data to Users sheet: {e}", exc_info=True)
 
     try:
+        welcome_message = TextMessage(
+            text=f"""友だち追加ありがとうございます😊
+
+ご予約の前に、利用案内の確認をお願いします。
+確認はすぐに完了できます。"""
+        )
+
         consent_button = TemplateMessage(
             alt_text="ご利用前に同意が必要です",
             template=ButtonsTemplate(
-                text="ご利用前に同意が必要です",
+                text="ご利用前に、予約システムの利用案内をご確認ください。",
                 actions=[
                     MessageAction(
                         label="ご利用前に同意",
@@ -649,7 +676,10 @@ def handle_follow(event: FollowEvent):
             line_bot_api.reply_message_with_http_info(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[consent_button],
+                    messages=[
+                        welcome_message,
+                        consent_button,
+                    ],
                 )
             )
     except Exception as e:
@@ -657,40 +687,36 @@ def handle_follow(event: FollowEvent):
 
 
 def handle_consent_screen(user_id: str, user_name: str, reply_token: str):
-    """Handle consent screen display"""
+    """Handle consent screen display.
+
+    初回表示は長文全文ではなく、要約版を表示する。
+    詳細を確認したいユーザーのみ「詳細を見る」から詳細版へ進める。
+    """
     try:
-        consent_screen_message = f"""📋 利用規約・プライバシーポリシー
+        consent_screen_message = f"""ご利用前に、以下の内容をご確認ください。
 
-{user_name}さん、サロンの予約システムをご利用いただき、ありがとうございます。
+【ご利用にあたって】
+・このLINEは美容室の予約受付・管理のために利用します
+・ご入力いただいた情報は、予約管理のためにのみ利用します
+・電話番号は、ご予約確認・変更時のご連絡・緊急時の連絡のために利用します
+・同意後、予約機能をご利用いただけます
 
-【利用規約】
-1. 予約システムは美容室の予約管理のためのサービスです
-2. 正確な情報を入力してください
-3. 予約の変更・キャンセルは適切な時間内に行ってください
-4. システムの不適切な利用は禁止されています
+内容をご確認のうえ、問題なければ「同意する」をお選びください。
 
-【プライバシーポリシー】
-1. お客様の個人情報は予約管理のみに使用されます
-2. 第三者への情報提供は行いません
-3. データは適切に保護・管理されます
-4. お客様の同意なく情報を利用することはありません
-
-【データの取り扱い】
-• 予約情報：日時、サービス、担当者
-• 連絡先：LINE ID、表示名、電話番号
-• 利用履歴：予約・変更・キャンセル記録
-
-※電話番号は、ご予約内容の確認や、変更・緊急時のご連絡のために利用します。
-
-これらの内容に同意していただける場合は、「同意する」とお送りください。"""
+詳しい内容を確認したい場合は「詳細を見る」からご確認いただけます。"""
 
         consent_button = TemplateMessage(
-            alt_text="利用規約に同意してください",
+            alt_text="利用案内をご確認ください",
             template=ButtonsTemplate(
-                text="利用規約に同意してください",
+                text="内容をご確認のうえ、お選びください。",
                 actions=[
                     MessageAction(label="同意する", text="同意する"),
                     MessageAction(label="同意しない", text="同意しない"),
+                    PostbackAction(
+                        label="詳細を見る",
+                        data="action=view_consent_detail",
+                        display_text="詳細を見る",
+                    ),
                 ],
             ),
         )
@@ -707,10 +733,88 @@ def handle_consent_screen(user_id: str, user_name: str, reply_token: str):
                 )
             )
 
-        print(f"Sent consent screen to user: {user_id} ({user_name})")
+        print(f"Sent consent summary screen to user: {user_id} ({user_name})")
 
     except Exception as e:
         logging.error(f"Failed to send consent screen: {e}", exc_info=True)
+
+
+def handle_consent_detail(user_id: str, user_name: str, reply_token: str):
+    """Handle detailed consent screen display.
+
+    「詳細を見る」を押したユーザーにのみ、利用規約・プライバシーポリシー・
+    データ取扱いの詳細を表示する。
+    """
+    try:
+        consent_detail_message = f"""📋 利用規約・プライバシーポリシー詳細
+
+{user_name}さん、詳細をご確認いただきありがとうございます。
+
+【利用規約】
+1. 本予約システムは、美容室の予約受付・予約管理を目的として提供されます。
+2. ご予約の際は、正確な情報をご入力ください。
+3. 予約の変更・キャンセルは、店舗が定める受付時間内に行ってください。
+4. 虚偽情報の入力、なりすまし、迷惑行為、不正利用は禁止されています。
+5. システム障害や通信環境により、一時的に利用できない場合があります。
+
+【プライバシーポリシー】
+1. お客様の個人情報は、予約受付・予約管理・予約確認のために利用します。
+2. ご本人の同意なく、目的外利用は行いません。
+3. 法令に基づく場合を除き、第三者へ個人情報を提供することはありません。
+4. 取得した情報は、適切な安全管理のもとで取り扱います。
+5. 不要となった情報は、運用上必要な範囲を除き、適切に管理・削除します。
+
+【取得・利用する情報】
+・LINEユーザーID
+・LINE表示名
+・電話番号
+・予約日時
+・予約メニュー
+・担当スタッフ
+・予約の変更・キャンセル履歴
+・お問い合わせ内容
+
+【電話番号の利用目的】
+電話番号は、以下の目的で利用します。
+・予約内容の確認
+・予約変更時のご連絡
+・キャンセルや遅刻などに関する確認
+・緊急時の店舗からの連絡
+
+【データの取り扱い】
+ご入力いただいた情報は、美容室の予約管理に必要な範囲でのみ利用します。
+予約対応、店舗運営上の確認、トラブル防止のために、予約履歴や変更履歴を一定期間保存する場合があります。
+
+内容をご確認のうえ、問題なければ「同意する」をお選びください。"""
+
+        consent_button = TemplateMessage(
+            alt_text="利用規約・プライバシーポリシー詳細",
+            template=ButtonsTemplate(
+                text="詳細をご確認のうえ、お選びください。",
+                actions=[
+                    MessageAction(label="同意する", text="同意する"),
+                    MessageAction(label="同意しない", text="同意しない"),
+                    MessageAction(label="要約に戻る", text="同意画面を開く"),
+                ],
+            ),
+        )
+
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[
+                        TextMessage(text=consent_detail_message),
+                        consent_button,
+                    ],
+                )
+            )
+
+        print(f"Sent consent detail screen to user: {user_id} ({user_name})")
+
+    except Exception as e:
+        logging.error(f"Failed to send consent detail screen: {e}", exc_info=True)
 
 
 def handle_consent_response(user_id: str, user_name: str, message_text: str, reply_token: str):
@@ -755,9 +859,9 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
         elif message_text == "同意しない":
             goodbye_message = f"""承知いたしました。
 
-{user_name}さん、ご利用規約にご同意いただけない場合は、ボットをご利用いただけません。
+{user_name}さん、ご利用案内に同意いただけない場合は、ボットの予約機能をご利用いただけません。
 
-ご利用規約にご同意いただけるようになりましたら、いつでもお声かけください。
+ご利用いただけるようになりましたら、いつでも「同意画面を開く」と送信してください。
 
 ありがとうございました。"""
 
@@ -775,4 +879,3 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
 
     except Exception as e:
         logging.error(f"Failed to handle consent response: {e}", exc_info=True)
-
