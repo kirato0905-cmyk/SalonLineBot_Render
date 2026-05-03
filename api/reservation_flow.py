@@ -389,129 +389,38 @@ class ReservationFlow:
         except Exception:
             return False
 
-    def _get_message_strategy_settings(self) -> Dict[str, Any]:
-        """
-        Sales-copy switching knobs.
-
-        Kept intentionally small and config-backed so future phases can move
-        thresholds / feature flags into config.json without changing call sites.
-        """
-        try:
-            self._reload_settings()
-            rules = self.settings_data.get("recommendation_rules", {})
-            if not isinstance(rules, dict):
-                rules = {}
-            return rules.get("message_strategy", {}) if isinstance(rules.get("message_strategy", {}), dict) else {}
-        except Exception as e:
-            logging.warning(f"Failed to load message_strategy. Using defaults. error={e}")
-            return {}
-
-    def _message_strategy_bool(self, key: str, default: bool = False) -> bool:
-        value = self._get_message_strategy_settings().get(key, default)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on", "有効"}
-        return bool(value)
-
-    def _message_strategy_int(self, key: str, default: int) -> int:
-        value = self._get_message_strategy_settings().get(key, default)
-        if isinstance(value, bool):
-            return default
-        if isinstance(value, (int, float)):
-            return int(value)
-        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
-            return int(value.strip())
-        return default
-
-    def _is_weekend_date(self, date_str: Optional[str]) -> bool:
-        try:
-            if not date_str:
-                return False
-            return datetime.strptime(str(date_str), "%Y-%m-%d").date().weekday() >= 5
-        except Exception:
-            return False
-
-    def _is_same_day_reservation(self, date_str: Optional[str]) -> bool:
-        try:
-            if not date_str:
-                return False
-            return datetime.strptime(str(date_str), "%Y-%m-%d").date() == datetime.now().date()
-        except Exception:
-            return False
-
-    def _is_near_term_reservation(self, date_str: Optional[str], days: Optional[int] = None) -> bool:
-        try:
-            if not date_str:
-                return False
-            near_days = days if days is not None else self._message_strategy_int("near_term_days", 3)
-            target = datetime.strptime(str(date_str), "%Y-%m-%d").date()
-            today = datetime.now().date()
-            return 0 <= (target - today).days <= int(near_days)
-        except Exception:
-            return False
-
-    def _is_high_value_order(self, total_price: Any) -> bool:
-        try:
-            threshold = self._message_strategy_int("high_value_threshold", 10000)
-            if isinstance(total_price, str):
-                total_price = total_price.replace(",", "").replace("円", "").strip()
-            return int(total_price or 0) >= threshold
-        except Exception:
-            return False
-
     def _select_message_variant(self, scene: str, context: Dict[str, Any]) -> str:
         """
-        Select scene-specific copy variant from reservation context.
+        Select message variant for future sales-oriented copy switching.
 
-        Priority is explicit per scene. Missing variants are skipped and the
-        caller falls back to default, so message switching never breaks the flow.
+        Phase 2-1 keeps the logic intentionally small, but the method already
+        accepts scene/context so A/B tests, seasonality, and tenant-specific
+        logic can be added later without changing call sites.
         """
         context = context or {}
 
         candidates: List[str] = []
-
-        if scene == "initial_menu":
-            if context.get("has_featured_sets"):
-                candidates.append("featured_sets_emphasis")
-
-        elif scene == "staff_selection":
-            if (
-                context.get("can_select_no_preference_staff")
-                and int(context.get("selectable_staff_count") or 0) > 1
-            ):
-                candidates.append("no_preference_push")
-
-        elif scene == "date_selection":
-            if context.get("is_near_term") or context.get("has_near_term_dates"):
-                candidates.append("near_term_push")
-            if context.get("is_weekend") or context.get("has_weekend_in_week"):
-                candidates.append("weekend_push")
-            if context.get("prefer_weekday_push") or self._message_strategy_bool("prefer_weekday_push", False):
-                candidates.append("weekday_push")
-
-        elif scene == "time_selection":
+        if scene == "date_selection":
             if context.get("is_same_day"):
                 candidates.append("same_day")
-            if context.get("has_recommended_slot") or context.get("has_recommended_slots"):
-                candidates.append("recommended_slot")
-            if context.get("has_easy_slots"):
-                candidates.append("easy_slot")
+            if context.get("is_weekend"):
+                candidates.append("weekend_push")
+            else:
+                candidates.append("weekday_push")
 
-        elif scene == "confirmation":
-            if context.get("is_high_value"):
-                candidates.append("high_value")
+        if scene == "staff_selection" and context.get("can_select_no_preference_staff"):
+            candidates.append("no_preference_push")
 
-        elif scene == "reservation_complete":
-            if context.get("enable_repeat_push") or self._message_strategy_bool("enable_repeat_push", False):
-                candidates.append("repeat_push")
+        if scene == "confirmation" and context.get("is_high_value"):
+            candidates.append("high_value")
+
+        if scene == "time_selection" and context.get("has_recommended_slot"):
+            candidates.append("recommended_slot")
 
         for candidate in candidates:
             if self._message_variant_exists(scene, candidate):
-                logging.debug(f"[message_variant] scene={scene} variant={candidate}")
                 return candidate
 
-        logging.debug(f"[message_variant] scene={scene} variant=default")
         return "default"
 
     def _build_message_context(self, user_id: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -524,34 +433,31 @@ class ReservationFlow:
         if extra:
             data.update(extra)
 
-        data.setdefault("user_id", user_id or data.get("user_id", ""))
-
         selected_date = data.get("date")
         if selected_date:
-            data["is_weekend"] = self._is_weekend_date(selected_date)
-            data["is_same_day"] = self._is_same_day_reservation(selected_date)
-            data["is_near_term"] = self._is_near_term_reservation(selected_date)
+            try:
+                date_obj = datetime.strptime(str(selected_date), "%Y-%m-%d").date()
+                data["is_weekend"] = date_obj.weekday() >= 5
+                data["is_same_day"] = date_obj == datetime.now().date()
+            except Exception:
+                data.setdefault("is_weekend", False)
+                data.setdefault("is_same_day", False)
         else:
             data.setdefault("is_weekend", False)
             data.setdefault("is_same_day", False)
-            data.setdefault("is_near_term", False)
 
         staff = data.get("staff")
         data["is_no_preference_staff"] = self._is_no_preference_staff(staff) if hasattr(self, "_is_no_preference_staff") else False
 
         total_price = data.get("total_price", data.get("price", 0))
         try:
-            if isinstance(total_price, str):
-                total_price_raw = total_price.replace(",", "").replace("円", "").strip()
-            else:
-                total_price_raw = total_price
-            total_price_int = int(total_price_raw or 0)
+            total_price_int = int(total_price or 0)
         except Exception:
             total_price_int = 0
 
         data["total_price"] = total_price_int
         data["price"] = f"{total_price_int:,}"
-        data["is_high_value"] = self._is_high_value_order(total_price_int)
+        data["is_high_value"] = total_price_int >= 15000
 
         if data.get("service") is None and data.get("services"):
             services = data.get("services")
@@ -561,13 +467,6 @@ class ReservationFlow:
                     for item in services
                     if isinstance(item, dict) and item.get("service_name")
                 )
-
-        data.setdefault("selected_menu_label", "")
-        data.setdefault("featured_set_id", "")
-        data.setdefault("selected_staff", "")
-        data.setdefault("total_duration", 0)
-        data.setdefault("has_featured_sets", False)
-        data.setdefault("has_recommended_slots", data.get("has_recommended_slot", False))
 
         if data.get("staff") is None:
             data["staff"] = ""
@@ -1183,23 +1082,39 @@ class ReservationFlow:
                 "data": f"action=select_featured_set&set_id={featured_set.get('id')}",
             })
 
-        featured_sets_text = "\n".join(featured_set_lines) if featured_set_lines else "・現在おすすめセットは準備中です"
-        fallback_text = (
-            "ご希望のメニューをお選びください👇\n\n"
-            "【人気セットメニュー】\n"
-            f"{featured_sets_text}\n\n"
-            "【その他】\n"
-            "・メニューを見る"
-        )
+        has_featured_sets = bool(featured_set_lines)
+        featured_sets_text = "\n".join(featured_set_lines) if has_featured_sets else "・現在おすすめセットは準備中です"
+
+        if has_featured_sets:
+            fallback_text = (
+                "人気のセットメニューから選ぶと、迷わずスムーズにご予約いただけます👇\n\n"
+                "髪全体を整えたい方には、セットメニューがおすすめです。\n\n"
+                "【人気セットメニュー】\n"
+                f"{featured_sets_text}\n\n"
+                "【その他】\n"
+                "・メニューを見る"
+            )
+        else:
+            fallback_text = (
+                "ご希望のメニューをお選びください👇\n\n"
+                "迷われる場合は、人気のセットメニューもおすすめです。\n"
+                "単品で選ぶよりスムーズにご予約いただけます。\n\n"
+                "【人気セットメニュー】\n"
+                f"{featured_sets_text}\n\n"
+                "【その他】\n"
+                "・メニューを見る"
+            )
+
         context = self._build_message_context(None, {
             "featured_sets": featured_sets_text,
-            "has_featured_sets": bool(featured_set_lines),
+            "has_featured_sets": has_featured_sets,
             "featured_set_count": len(featured_set_lines),
         })
         text = self._get_reservation_message(
             "initial_menu",
             context,
             fallback=fallback_text,
+            variant="featured_sets_emphasis" if has_featured_sets else None,
         )
 
         items.append({
@@ -1207,7 +1122,6 @@ class ReservationFlow:
             "text": "メニューを見る",
         })
         return self._quick_reply_return(text, items, include_cancel=True, include_back=False)
-
     def _build_category_selection_message(self, prefix: Optional[str] = None) -> Dict[str, Any]:
         lines = []
         if prefix:
@@ -1660,36 +1574,27 @@ class ReservationFlow:
         recommended = display_options[:recommend_count]
         others = display_options[recommend_count:recommend_count + other_count]
 
-        recommended_section = ""
+        lines = [
+            f"{selected_date}ですね👌",
+            "",
+            f"{service_name}（{service_duration}分）の空き状況はこちら。",
+            "",
+        ]
+
         if recommended:
-            recommended_lines = ["【🔥おすすめ】"]
-            recommended_lines.extend([f"・{t}～" for t in recommended])
-            recommended_section = "\n".join(recommended_lines) + "\n\n"
+            lines.append("【🔥おすすめ】")
+            for t in recommended:
+                lines.append(f"・{t}～")
+            lines.append("")
 
-        other_section = ""
         if others:
-            other_lines = ["【その他】"]
-            other_lines.extend([f"・{t}～" for t in others])
-            other_section = "\n".join(other_lines) + "\n\n"
+            lines.append("【その他】")
+            for t in others:
+                lines.append(f"・{t}～")
+            lines.append("")
 
-        fallback_text = (
-            f"{selected_date}ですね👌\n\n"
-            f"{service_name}（{service_duration}分）の空き状況はこちら。\n\n"
-            f"{recommended_section}"
-            f"{other_section}"
-            "ご希望の時間をお選びください👇"
-        )
-        context_data = self._build_message_context(None, {
-            "date": selected_date,
-            "service": service_name,
-            "duration": service_duration,
-            "recommended_section": recommended_section,
-            "other_section": other_section,
-            "has_recommended_slot": bool(recommended),
-            "has_recommended_slots": bool(recommended),
-            "has_easy_slots": len(time_options) >= self._message_strategy_int("easy_slot_min_count", 5),
-        })
-        return self._get_reservation_message("time_selection", context_data, fallback=fallback_text)
+        lines.append("ご希望の時間をお選びください👇")
+        return "\n".join(lines)
 
     def _build_time_selection_quick_reply(
         self,
@@ -2160,19 +2065,13 @@ class ReservationFlow:
         fallback_header += "※土日・午前中は埋まりやすいためお早めのご予約がおすすめです！\n\n"
         fallback_header += f"※{limit_days}日以降は「{example_date}」の形式でご入力ください。"
 
-        has_weekend_in_week = any(datetime.strptime(ds, "%Y-%m-%d").date().weekday() >= 5 for ds in bookable)
-        near_term_dates = [ds for ds in bookable if self._is_near_term_reservation(ds)]
         context_data = self._build_message_context(user_id, {
             "limit_days": limit_days,
             "example_date": example_date,
             "week_start": ws.strftime("%Y-%m-%d"),
-            "reservation_hint": "土日・午前中はご予約が埋まりやすいため、ご希望のお時間がある場合はお早めのご予約がおすすめです。",
-            "has_weekend_in_week": has_weekend_in_week,
-            "has_near_term_dates": bool(near_term_dates),
-            "near_term_dates_count": len(near_term_dates),
+            "has_weekend_in_week": any(datetime.strptime(ds, "%Y-%m-%d").date().weekday() >= 5 for ds in bookable),
         })
         context_data["is_weekend"] = bool(context_data.get("has_weekend_in_week"))
-        context_data["is_near_term"] = bool(context_data.get("has_near_term_dates"))
         header = self._get_reservation_message("date_selection", context_data, fallback=fallback_header)
 
         text = (f"{error_prefix}\n\n" if error_prefix else "") + header
@@ -2208,8 +2107,7 @@ class ReservationFlow:
 
         context_data = self._build_message_context(user_id, {
             "service": service_name,
-            "can_select_no_preference_staff": len(selectable_staff) > 1,
-            "selectable_staff_count": len(selectable_staff),
+            "can_select_no_preference_staff": True,
             "staff_options": chr(10).join(staff_lines),
         })
         staff_header = self._get_reservation_message(
