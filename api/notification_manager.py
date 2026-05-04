@@ -86,6 +86,28 @@ class NotificationManager:
         )
         return True
 
+    def notify_critical_error(
+        self,
+        title: str,
+        message: str,
+        reservation_data: Dict[str, Any] = None,
+        error: Exception = None,
+    ) -> bool:
+        """Send critical operator notification to Slack.
+
+        Critical notifications are used for manual-recovery states such as:
+        - Calendar created but Sheets save failed
+        - rollback failed
+        - reservation data consistency cannot be guaranteed
+        """
+        if self.slack_notifier and self.slack_notifier.enabled:
+            try:
+                return bool(self.slack_notifier.notify_critical_error(title, message, reservation_data, error))
+            except Exception as e:
+                logging.error(f"Slack critical notification failed: {e}", exc_info=True)
+        logging.critical(f"CRITICAL notification could not be sent. title={title} message={message}")
+        return False
+
 
 # Global instance
 notification_manager = NotificationManager()
@@ -123,6 +145,16 @@ def send_reminder_status_notification(
 ) -> bool:
     """Compatibility wrapper. Reminder operator notification is disabled."""
     return notification_manager.notify_reminder_status(success_count, total_count, failed_reservations)
+
+
+def send_critical_error_notification(
+    title: str,
+    message: str,
+    reservation_data: Dict[str, Any] = None,
+    error: Exception = None,
+) -> bool:
+    """Send critical operator notification using Slack."""
+    return notification_manager.notify_critical_error(title, message, reservation_data, error)
 
 
 if __name__ == "__main__":
