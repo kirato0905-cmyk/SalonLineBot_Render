@@ -41,7 +41,10 @@ class GoogleSheetsLogger:
 
     RESERVATION_HEADERS = [
         "登録日時",
+        "店舗ID",
         "予約ID",
+        "カレンダーID",
+        "カレンダー予定ID",
         "予約日",
         "開始時間",
         "終了時間",
@@ -70,6 +73,7 @@ class GoogleSheetsLogger:
     ]
 
     TODAY_RESERVATION_HEADERS = [
+        "店舗ID",
         "予約ID",
         "予約日",
         "開始時間",
@@ -82,8 +86,38 @@ class GoogleSheetsLogger:
         "備考",
     ]
 
+    CANCELLATION_HISTORY_SHEET_TITLE = "キャンセル履歴"
+    CANCELLATION_HISTORY_HEADERS = [
+        "キャンセル日時",
+        "店舗ID",
+        "予約ID",
+        "予約日",
+        "開始時間",
+        "終了時間",
+        "顧客名",
+        "電話番号",
+        "メニュー表示用",
+        "指名スタッフ",
+        "実担当スタッフ",
+        "料金目安",
+        "キャンセル理由",
+        "ユーザーID",
+        "元ステータス",
+        "カレンダーID",
+        "カレンダー予定ID",
+        "備考",
+    ]
+
     FIELD_ALIASES = {
         "Timestamp": "登録日時",
+        "Store ID": "店舗ID",
+        "store_id": "店舗ID",
+        "Calendar ID": "カレンダーID",
+        "calendar_id": "カレンダーID",
+        "Calendar Event ID": "カレンダー予定ID",
+        "calendar_event_id": "カレンダー予定ID",
+        "event_id": "カレンダー予定ID",
+
         "timestamp": "登録日時",
         "Reservation ID": "予約ID",
         "reservation_id": "予約ID",
@@ -212,6 +246,7 @@ class GoogleSheetsLogger:
         self.reservations_worksheet = None
         self.users_worksheet = None
         self.today_reservations_worksheet = None
+        self.cancellation_history_worksheet = None
         self.spreadsheet = None
         self.tokyo_tz = pytz.timezone("Asia/Tokyo")
         self._records_cache: Dict[str, Dict[str, Any]] = {}
@@ -322,6 +357,13 @@ class GoogleSheetsLogger:
                 headers=self.TODAY_RESERVATION_HEADERS,
                 migrate=auto_migrate,
             )
+            self.cancellation_history_worksheet = self._get_or_create_worksheet(
+                title=self.CANCELLATION_HISTORY_SHEET_TITLE,
+                rows=1000,
+                cols=len(self.CANCELLATION_HISTORY_HEADERS),
+                headers=self.CANCELLATION_HISTORY_HEADERS,
+                migrate=auto_migrate,
+            )
             if refresh_today_on_startup:
                 self.refresh_today_reservations()
             logging.info("Google Sheets logger initialized successfully")
@@ -331,6 +373,7 @@ class GoogleSheetsLogger:
             self.reservations_worksheet = None
             self.users_worksheet = None
             self.today_reservations_worksheet = None
+            self.cancellation_history_worksheet = None
             self.spreadsheet = None
 
     def _get_or_create_worksheet(
@@ -582,6 +625,12 @@ class GoogleSheetsLogger:
             migrate=True,
         )
         return self.today_reservations_worksheet
+
+
+    def _get_cancellation_history_worksheet(self):
+        if self.cancellation_history_worksheet is None:
+            self._setup_connection()
+        return self.cancellation_history_worksheet
 
     def _get_users_records(self) -> List[Dict[str, Any]]:
         cache_key = "users_records"
@@ -1028,7 +1077,10 @@ class GoogleSheetsLogger:
 
             record = {
                 "登録日時": self._get_tokyo_timestamp(),
+                "店舗ID": reservation_data.get("store_id", "store_default"),
                 "予約ID": reservation_data.get("reservation_id", ""),
+                "カレンダーID": reservation_data.get("calendar_id", ""),
+                "カレンダー予定ID": reservation_data.get("calendar_event_id", reservation_data.get("event_id", "")),
                 "予約日": reservation_data.get("date", ""),
                 "開始時間": self._normalize_time_value(reservation_data.get("start_time", "")),
                 "終了時間": self._normalize_time_value(reservation_data.get("end_time", "")),
@@ -1080,7 +1132,10 @@ class GoogleSheetsLogger:
         service_display = normalized.get("メニュー表示用") or self._build_service_display_from_services(services)
         assigned_staff = normalized.get("実担当スタッフ", "")
         return {
+            "store_id": normalized.get("店舗ID", "store_default"),
             "reservation_id": normalized.get("予約ID"),
+            "calendar_id": normalized.get("カレンダーID", ""),
+            "calendar_event_id": normalized.get("カレンダー予定ID", ""),
             "user_id": normalized.get("ユーザーID"),
             "client_name": normalized.get("顧客名"),
             "phone_number": self._normalize_phone_number(normalized.get("電話番号"), for_sheet=True),
@@ -1210,6 +1265,7 @@ class GoogleSheetsLogger:
             if status == "キャンセル済み":
                 continue
             rows.append([
+                record.get("店舗ID", "store_default"),
                 record.get("予約ID", ""),
                 record.get("予約日", ""),
                 self._normalize_time_value(record.get("開始時間", "")),
@@ -1260,6 +1316,52 @@ class GoogleSheetsLogger:
         if record:
             return record.get("ユーザーID") or None
         return None
+
+
+    def append_cancellation_history(self, reservation_data: Dict[str, Any], reason: str = "") -> bool:
+        ws = self._get_cancellation_history_worksheet()
+        if not ws:
+            return False
+        try:
+            data = dict(reservation_data or {})
+            row = [
+                self._get_tokyo_timestamp(),
+                data.get("store_id", "store_default"),
+                data.get("reservation_id", ""),
+                data.get("date", ""),
+                self._normalize_time_value(data.get("start_time", "")),
+                self._normalize_time_value(data.get("end_time", "")),
+                data.get("client_name", ""),
+                self._resolve_phone_for_reservation_sheet(data.get("phone_number", ""), user_id=data.get("user_id", "")),
+                data.get("service", ""),
+                self._display_selected_staff(data.get("selected_staff", "")),
+                data.get("assigned_staff") or data.get("staff", ""),
+                data.get("price") or data.get("total_price", ""),
+                reason,
+                data.get("user_id", ""),
+                data.get("status_display") or self._to_sheet_status(data.get("status", "")),
+                data.get("calendar_id", ""),
+                data.get("calendar_event_id", ""),
+                data.get("remarks", data.get("note", "")),
+            ]
+            ws.append_row(row, value_input_option="RAW")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to append cancellation history: {e}", exc_info=True)
+            return False
+
+    def mark_cancelled_and_archive(self, reservation_id: str, reason: str = "") -> bool:
+        reservation = self.get_reservation_by_id(reservation_id)
+        if not reservation:
+            logging.warning(f"Reservation {reservation_id} not found for cancellation archive")
+            return False
+        status_ok = self.update_reservation_status(reservation_id, "Cancelled")
+        history_ok = self.append_cancellation_history(reservation, reason=reason)
+        try:
+            self.refresh_today_reservations()
+        except Exception as e:
+            logging.warning(f"Failed to refresh today reservations after cancellation: {e}")
+        return bool(status_ok and history_ok)
 
     # =========================================================
     # user functions
@@ -1469,6 +1571,5 @@ def get_sheets_logger() -> GoogleSheetsLogger:
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
     return _sheets_logger_instance
-
 
 
