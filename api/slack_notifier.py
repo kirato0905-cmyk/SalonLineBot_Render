@@ -323,6 +323,57 @@ def send_reminder_status_notification(
     return slack_notifier.notify_reminder_status(success_count, total_count, failed_reservations)
 
 
+
+    def _mask_user_id(self, user_id: str) -> str:
+        if not user_id:
+            return ""
+        user_id = str(user_id)
+        return user_id[:6] + "***" if len(user_id) > 6 else "***"
+
+    def notify_critical_error(
+        self,
+        title: str,
+        message: str,
+        reservation_data: Dict[str, Any] = None,
+        error: Exception = None,
+    ) -> bool:
+        """Send a CRITICAL Slack notification for states requiring manual recovery."""
+        reservation_data = reservation_data or {}
+        lines = [message.strip() if message else "手動確認が必要です。"]
+
+        if reservation_data:
+            lines.extend([
+                "",
+                f"店舗ID：{reservation_data.get('store_id', 'store_default')}",
+                f"予約ID：{reservation_data.get('reservation_id', 'N/A')}",
+                f"Calendar ID：{reservation_data.get('calendar_id', 'N/A')}",
+                f"Calendar Event ID：{reservation_data.get('calendar_event_id', 'N/A')}",
+                "",
+                f"顧客名：{reservation_data.get('client_name', 'N/A')}",
+                f"電話番号：{reservation_data.get('phone_number', 'N/A')}",
+                f"日時：{reservation_data.get('date', 'N/A')} {reservation_data.get('start_time', 'N/A')}~{reservation_data.get('end_time', 'N/A')}",
+                f"メニュー：{reservation_data.get('service', 'N/A')}",
+                f"担当：{reservation_data.get('staff') or reservation_data.get('assigned_staff', 'N/A')}",
+                f"ユーザーID：{self._mask_user_id(reservation_data.get('user_id', ''))}",
+            ])
+
+        if error:
+            lines.extend(["", f"Error：{type(error).__name__}: {error}"])
+
+        lines.extend([
+            "",
+            "対応：",
+            "1. Google Calendar上の予定有無を確認",
+            "2. 必要なら手動削除またはSheets補正",
+            "3. ユーザーへの連絡要否を確認",
+        ])
+
+        return self.send_notification(
+            message="\n".join(lines),
+            title=f"🚨CRITICAL: {title}",
+            color="danger",
+        )
+
 if __name__ == "__main__":
     notifier = SlackNotifier()
 
@@ -341,5 +392,4 @@ if __name__ == "__main__":
         print("✅ Test notification sent successfully!")
     else:
         print("❌ Failed to send test notification")
-
 
