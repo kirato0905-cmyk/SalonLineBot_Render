@@ -348,9 +348,27 @@ class GoogleCalendarHelper:
             return "busy"
 
     def create_reservation_event(self, reservation_data: Dict[str, Any], client_name: str) -> bool:
+        """Backward-compatible wrapper.
+
+        Existing callers historically expected bool. New transaction code should
+        call create_reservation_event_with_result() to receive event_id/calendar_id.
+        """
+        result = self.create_reservation_event_with_result(reservation_data, client_name)
+        return bool(result.get("success"))
+
+    def create_reservation_event_with_result(self, reservation_data: Dict[str, Any], client_name: str) -> Dict[str, Any]:
+        """Create a Google Calendar reservation event and return event metadata.
+
+        Returns:
+            success: bool
+            event_id: Google Calendar event id when created
+            calendar_id: target staff calendar id
+            html_link: Google Calendar htmlLink when available
+            reason/error: machine-readable failure reason
+        """
         if not self.service:
-            print("Google Calendar not configured, skipping event creation")
-            return False
+            logging.error("Google Calendar not configured; event creation aborted")
+            return {"success": False, "reason": "calendar_not_configured"}
 
         try:
             self._reload_config_data()
@@ -367,12 +385,12 @@ class GoogleCalendarHelper:
 
             if not staff:
                 logging.error(f"Staff name missing in reservation_data: {reservation_data}")
-                return False
+                return {"success": False, "reason": "staff_missing"}
 
             staff_calendar_id = self._get_staff_calendar_id(staff)
             if not staff_calendar_id:
                 logging.error(f"Staff calendar ID not found for staff '{staff}'")
-                return False
+                return {"success": False, "reason": "staff_calendar_missing"}
 
             if "start_time" in reservation_data and "end_time" in reservation_data:
                 start_time_str = reservation_data["start_time"]
@@ -398,7 +416,23 @@ class GoogleCalendarHelper:
                     f"Reservation rejected by attendance/business-hours check: "
                     f"staff={staff}, date={date_str}, start={start_time_str}, end={end_time_str}"
                 )
-                return False
+                return {"success": False, "reason": "outside_business_or_attendance"}
+
+            # Final race-condition guard immediately before Calendar insert.
+            availability_reason = self.check_staff_availability_reason(
+                date_str=date_str,
+                start_time=start_time_str,
+                end_time=end_time_str,
+                staff_name=staff,
+                exclude_reservation_id=reservation_data.get("exclude_reservation_id"),
+            )
+            if availability_reason != "ok":
+                logging.warning(
+                    f"Final availability check failed before calendar insert. "
+                    f"reason={availability_reason}, staff={staff}, date={date_str}, "
+                    f"start={start_time_str}, end={end_time_str}"
+                )
+                return {"success": False, "reason": availability_reason}
 
             tokyo_tz = pytz.timezone(self.timezone)
             if start_datetime.tzinfo is None:
@@ -411,9 +445,6 @@ class GoogleCalendarHelper:
             else:
                 end_datetime = end_datetime.astimezone(tokyo_tz)
 
-            start_iso = start_datetime.isoformat()
-            end_iso = end_datetime.isoformat()
-
             reservation_id = reservation_data.get("reservation_id", self.generate_reservation_id(date_str))
 
             description_lines = [
@@ -425,6 +456,9 @@ class GoogleCalendarHelper:
                 f"所要時間: {duration_minutes}分",
                 "予約元: LINE Bot",
             ]
+            store_id = reservation_data.get("store_id")
+            if store_id:
+                description_lines.append(f"Store ID: {store_id}")
             if selected_staff:
                 description_lines.append(f"Selected Staff: {selected_staff}")
             if assigned_staff:
@@ -435,26 +469,26 @@ class GoogleCalendarHelper:
             event = {
                 "summary": f"[予約] {service_name} - {client_name} ({assigned_staff})",
                 "description": "\n".join(description_lines),
-                "start": {
-                    "dateTime": start_iso,
-                    "timeZone": self.timezone,
-                },
-                "end": {
-                    "dateTime": end_iso,
-                    "timeZone": self.timezone,
-                },
+                "start": {"dateTime": start_datetime.isoformat(), "timeZone": self.timezone},
+                "end": {"dateTime": end_datetime.isoformat(), "timeZone": self.timezone},
             }
 
-            self.service.events().insert(calendarId=staff_calendar_id, body=event).execute()
+            created_event = self.service.events().insert(calendarId=staff_calendar_id, body=event).execute()
             self._clear_runtime_caches()
-            return True
+            return {
+                "success": True,
+                "event_id": created_event.get("id", ""),
+                "calendar_id": staff_calendar_id,
+                "html_link": created_event.get("htmlLink", ""),
+                "reservation_id": reservation_id,
+            }
 
         except HttpError as e:
             logging.error(f"Google Calendar API error: {e}", exc_info=True)
-            return False
+            return {"success": False, "reason": "calendar_api_error", "error": str(e)}
         except Exception as e:
             logging.error(f"Failed to create calendar event: {e}", exc_info=True)
-            return False
+            return {"success": False, "reason": "calendar_create_exception", "error": str(e)}
 
     def _parse_event_datetime(self, event_time_obj: Dict[str, Any], default_is_end: bool = False) -> Optional[datetime]:
         try:
@@ -840,6 +874,29 @@ class GoogleCalendarHelper:
             print(f"Failed to get reservation by ID {reservation_id}: {e}")
             return None
 
+    def cancel_event_by_event_id(self, calendar_id: str, event_id: str) -> bool:
+        """Delete a Google Calendar event by concrete calendar_id + event_id.
+
+        This is safer than searching by reservation_id and is used for rollback.
+        """
+        if not self.service or not calendar_id or not event_id:
+            return False
+        try:
+            self.service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+            self._clear_runtime_caches()
+            return True
+        except HttpError as e:
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status == 404:
+                logging.warning(f"Calendar event already missing during delete. calendar_id={calendar_id}, event_id={event_id}")
+                self._clear_runtime_caches()
+                return True
+            logging.error(f"Failed to delete calendar event by event_id: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logging.error(f"Failed to delete calendar event by event_id: {e}", exc_info=True)
+            return False
+
     def cancel_reservation_by_id(self, reservation_id: str, staff_name: str = None) -> bool:
         try:
             event = self.get_reservation_by_id(reservation_id, staff_name)
@@ -1164,6 +1221,4 @@ class GoogleCalendarHelper:
             exclude_reservation_id=exclude_reservation_id,
         )
         return assigned["staff_name"] if assigned else None
-
-
 
