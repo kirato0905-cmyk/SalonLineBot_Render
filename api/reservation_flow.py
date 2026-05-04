@@ -573,6 +573,7 @@ class ReservationFlow:
 
         data["total_price"] = total_price_int
         data["price"] = f"{total_price_int:,}"
+        data["price_display"] = "店舗にて確認" if total_price_int <= 0 else f"¥{total_price_int:,}"
         data["is_high_value"] = self._is_high_value_order(total_price_int)
 
         if data.get("service") is None and data.get("services"):
@@ -3555,42 +3556,43 @@ class ReservationFlow:
         else:
             reservation_data["selected_staff"] = reservation_data.get("selected_staff") or reservation_data["staff"]
 
-        reservation_id = self.google_calendar.generate_reservation_id(reservation_data["date"])
-        reservation_data["reservation_id"] = reservation_id
-
         client_name = self._get_line_display_name(user_id)
-
-        calendar_success = self.google_calendar.create_reservation_event(
-            reservation_data,
-            client_name,
-        )
-        if not calendar_success:
-            return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
+        reservation_data["user_id"] = user_id
+        reservation_data["client_name"] = client_name
+        reservation_data.setdefault("store_id", self.config_data.get("salon", {}).get("store_id", "store_default"))
+        reservation_data["duration"] = reservation_data["total_duration"]
+        reservation_data["price"] = reservation_data["total_price"]
 
         try:
-            sheets_logger = self.sheets_logger
+            from api.reservation_transaction_service import ReservationTransactionService
+            from api.notification_manager import notification_manager
 
-            sheet_reservation_data = {
-                "reservation_id": reservation_id,
-                "user_id": user_id,
-                "client_name": client_name,
-                "date": reservation_data["date"],
-                "start_time": reservation_data.get("start_time", reservation_data.get("time", "")),
-                "end_time": reservation_data.get("end_time", ""),
-                "service": reservation_data["service"],
-                "services": reservation_data["services"],
-                "selected_staff": reservation_data.get("selected_staff", ""),
-                "assigned_staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
-                "staff": reservation_data.get("assigned_staff") or reservation_data["staff"],
-                "duration": reservation_data["total_duration"],
-                "price": reservation_data["total_price"],
-            }
-
-            sheets_success = sheets_logger.save_reservation(sheet_reservation_data)
-            if not sheets_success:
-                logging.warning("Failed to save reservation to sheets, but calendar creation succeeded")
+            transaction = ReservationTransactionService(
+                calendar_helper=self.google_calendar,
+                reservation_repository=self.sheets_logger,
+                notification_manager=notification_manager,
+            )
+            transaction_result = transaction.create_reservation(
+                reservation_data=reservation_data,
+                client_name=client_name,
+                final_availability_check=self._check_final_availability,
+                clear_cache=lambda: (self.google_calendar._clear_runtime_caches(), self._clear_runtime_cache(user_id)),
+            )
         except Exception as e:
-            logging.error(f"Failed to save reservation to sheets: {e}", exc_info=True)
+            logging.error(f"Reservation transaction raised: {e}", exc_info=True)
+            return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
+
+        if not transaction_result.get("success"):
+            if transaction_result.get("requires_manual_check"):
+                if user_id in self.user_states:
+                    del self.user_states[user_id]
+                return "予約処理中に確認が必要な状態になりました。\n\nお手数ですが、サロン側で予約状況を確認いたします。\n同じ内容で再度予約を行わず、少しお待ちください。"
+            if transaction_result.get("stage") in {"availability", "calendar"}:
+                return "申し訳ございません。選択された時間は先ほど埋まった可能性があります。\n別の時間をお選びください。"
+            return "申し訳ございません。予約登録中にエラーが発生しました。時間をおいてもう一度お試しください。"
+
+        reservation_id = transaction_result.get("reservation_id")
+        reservation_data.update(transaction_result.get("reservation_data", {}))
 
         try:
             self.google_calendar._clear_runtime_caches()
@@ -3617,6 +3619,7 @@ class ReservationFlow:
             "staff": assigned_staff,
             "total_price": reservation_data.get("total_price", 0),
             "price": f"{int(reservation_data.get('total_price', 0) or 0):,}",
+            "price_display": "店舗にて確認" if int(reservation_data.get('total_price', 0) or 0) <= 0 else f"¥{int(reservation_data.get('total_price', 0) or 0):,}",
         })
         fallback_text = f"""ご予約が確定しました😊
 
@@ -3695,12 +3698,14 @@ class ReservationFlow:
                 )
                 return "申し訳ございません。元の予約の更新処理に失敗しました。時間をおいてもう一度お試しください。"
 
-            calendar_success = self.google_calendar.create_reservation_event(
+            calendar_result = self.google_calendar.create_reservation_event_with_result(
                 new_data,
                 client_name,
             )
-            if not calendar_success:
+            if not calendar_result.get("success"):
                 return "申し訳ございません。予約変更中にエラーが発生しました。時間をおいてもう一度お試しください。"
+            new_data["calendar_event_id"] = calendar_result.get("event_id", "")
+            new_data["calendar_id"] = calendar_result.get("calendar_id", "")
 
             try:
                 field_updates = {
@@ -3714,6 +3719,8 @@ class ReservationFlow:
                     "Duration (min)": new_data["total_duration"],
                     "Price": new_data["total_price"],
                     "Status": "Modified",
+                    "Calendar Event ID": new_data.get("calendar_event_id", ""),
+                    "Calendar ID": new_data.get("calendar_id", ""),
                 }
                 self.sheets_logger.update_reservation_data(original_reservation_id, field_updates)
             except Exception as e:
