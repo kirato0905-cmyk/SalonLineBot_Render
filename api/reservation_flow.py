@@ -22,6 +22,32 @@ class ReservationFlow:
         self.google_calendar = GoogleCalendarHelper()
         self.line_configuration = None
         self.sheets_logger = get_sheets_logger()
+
+        # DB保存への切り替え設定
+        # DB_ENABLED=true かつ DB_PRIMARY=true の場合のみDB Repositoryを利用します。
+        # それ以外の場合は、従来どおりGoogle Sheetsへ保存します。
+        self.db_enabled = os.getenv("DB_ENABLED", "false").lower() == "true"
+        self.db_primary = os.getenv("DB_PRIMARY", "false").lower() == "true"
+        self.reservation_repository = self.sheets_logger
+
+        if self.db_enabled and self.db_primary:
+            try:
+                # DB保存を有効化した場合だけ読み込むことで、
+                # DB未設定時に既存のSheets運用を壊さないようにします。
+                from api.repositories.database_reservation_repository import DatabaseReservationRepository
+
+                self.reservation_repository = DatabaseReservationRepository()
+                logging.info("Reservation repository switched to DatabaseReservationRepository.")
+            except Exception as e:
+                logging.error(
+                    f"Failed to initialize DatabaseReservationRepository. "
+                    f"Falling back to Google Sheets. error={e}",
+                    exc_info=True,
+                )
+                self.reservation_repository = self.sheets_logger
+        else:
+            logging.info("Reservation repository uses Google Sheets.")
+
         self._profile_cache: Dict[str, Dict[str, Any]] = {}
         self._profile_cache_ttl_seconds = 3600
 
@@ -3569,7 +3595,7 @@ class ReservationFlow:
 
             transaction = ReservationTransactionService(
                 calendar_helper=self.google_calendar,
-                reservation_repository=self.sheets_logger,
+                reservation_repository=self.reservation_repository,
                 notification_manager=notification_manager,
             )
             transaction_result = transaction.create_reservation(
