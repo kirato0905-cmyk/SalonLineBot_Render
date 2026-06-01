@@ -3620,6 +3620,15 @@ class ReservationFlow:
         reservation_id = transaction_result.get("reservation_id")
         reservation_data.update(transaction_result.get("reservation_data", {}))
 
+        # DBを主保存先にしている場合のみ、予約成功後にSheetsへバックアップ保存します。
+        # Sheetsへのコピーに失敗しても、DB保存済みの予約自体は成功として扱います。
+        if self.db_enabled and self.db_primary:
+            try:
+                self.sheets_logger.save_reservation(reservation_data)
+                logging.info("Reservation successfully backed up to Google Sheets after DB save.")
+            except Exception as e:
+                logging.error(f"Sheets sync failed after DB reservation save: {e}", exc_info=True)
+
         try:
             self.google_calendar._clear_runtime_caches()
             self._clear_runtime_cache(user_id)
