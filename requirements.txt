@@ -12,3 +12,6 @@ oauth2client
 pytz
 faiss-cpu
 sentence-transformers
+sqlalchemy
+psycopg2-binary
+alembic
