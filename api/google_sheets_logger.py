@@ -39,12 +39,11 @@ class GoogleSheetsLogger:
 
     PHONE_UNREGISTERED_LABEL = "未登録"
 
+    # 店舗スタッフ向けの確認用シートには、内部管理IDを表示しない。
+    # 店舗ID / カレンダーID / カレンダー予定ID は Supabase DB 側で保持する。
     RESERVATION_HEADERS = [
         "登録日時",
-        "店舗ID",
         "予約ID",
-        "カレンダーID",
-        "カレンダー予定ID",
         "予約日",
         "開始時間",
         "終了時間",
@@ -73,7 +72,6 @@ class GoogleSheetsLogger:
     ]
 
     TODAY_RESERVATION_HEADERS = [
-        "店舗ID",
         "予約ID",
         "予約日",
         "開始時間",
@@ -89,7 +87,6 @@ class GoogleSheetsLogger:
     CANCELLATION_HISTORY_SHEET_TITLE = "キャンセル履歴"
     CANCELLATION_HISTORY_HEADERS = [
         "キャンセル日時",
-        "店舗ID",
         "予約ID",
         "予約日",
         "開始時間",
@@ -103,8 +100,6 @@ class GoogleSheetsLogger:
         "キャンセル理由",
         "ユーザーID",
         "元ステータス",
-        "カレンダーID",
-        "カレンダー予定ID",
         "備考",
     ]
 
@@ -1077,10 +1072,7 @@ class GoogleSheetsLogger:
 
             record = {
                 "登録日時": self._get_tokyo_timestamp(),
-                "店舗ID": reservation_data.get("store_id", "store_default"),
                 "予約ID": reservation_data.get("reservation_id", ""),
-                "カレンダーID": reservation_data.get("calendar_id", ""),
-                "カレンダー予定ID": reservation_data.get("calendar_event_id", reservation_data.get("event_id", "")),
                 "予約日": reservation_data.get("date", ""),
                 "開始時間": self._normalize_time_value(reservation_data.get("start_time", "")),
                 "終了時間": self._normalize_time_value(reservation_data.get("end_time", "")),
@@ -1265,7 +1257,6 @@ class GoogleSheetsLogger:
             if status == "キャンセル済み":
                 continue
             rows.append([
-                record.get("店舗ID", "store_default"),
                 record.get("予約ID", ""),
                 record.get("予約日", ""),
                 self._normalize_time_value(record.get("開始時間", "")),
@@ -1326,7 +1317,6 @@ class GoogleSheetsLogger:
             data = dict(reservation_data or {})
             row = [
                 self._get_tokyo_timestamp(),
-                data.get("store_id", "store_default"),
                 data.get("reservation_id", ""),
                 data.get("date", ""),
                 self._normalize_time_value(data.get("start_time", "")),
@@ -1340,8 +1330,6 @@ class GoogleSheetsLogger:
                 reason,
                 data.get("user_id", ""),
                 data.get("status_display") or self._to_sheet_status(data.get("status", "")),
-                data.get("calendar_id", ""),
-                data.get("calendar_event_id", ""),
                 data.get("remarks", data.get("note", "")),
             ]
             ws.append_row(row, value_input_option="RAW")
@@ -1571,5 +1559,4 @@ def get_sheets_logger() -> GoogleSheetsLogger:
     if _sheets_logger_instance is None:
         _sheets_logger_instance = GoogleSheetsLogger()
     return _sheets_logger_instance
-
 
