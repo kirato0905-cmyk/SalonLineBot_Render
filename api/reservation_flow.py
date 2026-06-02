@@ -28,6 +28,7 @@ class ReservationFlow:
         # それ以外の場合は、従来どおりGoogle Sheetsへ保存します。
         self.db_enabled = os.getenv("DB_ENABLED", "false").lower() == "true"
         self.db_primary = os.getenv("DB_PRIMARY", "false").lower() == "true"
+        self.db_primary_active = False
         self.reservation_repository = self.sheets_logger
 
         if self.db_enabled and self.db_primary:
@@ -37,6 +38,7 @@ class ReservationFlow:
                 from api.repositories.database_reservation_repository import DatabaseReservationRepository
 
                 self.reservation_repository = DatabaseReservationRepository()
+                self.db_primary_active = True
                 logging.info("Reservation repository switched to DatabaseReservationRepository.")
             except Exception as e:
                 logging.error(
@@ -3622,7 +3624,7 @@ class ReservationFlow:
 
         # DBを主保存先にしている場合のみ、予約成功後にSheetsへバックアップ保存します。
         # Sheetsへのコピーに失敗しても、DB保存済みの予約自体は成功として扱います。
-        if self.db_enabled and self.db_primary:
+        if self.db_primary_active:
             try:
                 self.sheets_logger.save_reservation(reservation_data)
                 logging.info("Reservation successfully backed up to Google Sheets after DB save.")
@@ -3741,25 +3743,51 @@ class ReservationFlow:
                 return "申し訳ございません。予約変更中にエラーが発生しました。時間をおいてもう一度お試しください。"
             new_data["calendar_event_id"] = calendar_result.get("event_id", "")
             new_data["calendar_id"] = calendar_result.get("calendar_id", "")
+            new_data["calendar_html_link"] = calendar_result.get("html_link", "")
 
-            try:
-                field_updates = {
-                    "Date": new_data["date"],
-                    "Start Time": new_data.get("start_time", new_data.get("time", "")),
-                    "End Time": new_data.get("end_time", ""),
-                    "Service": new_data["service"],
-                    "Selected Staff": new_data.get("selected_staff", ""),
-                    "Assigned Staff": new_data.get("assigned_staff") or new_data["staff"],
-                    "Staff": new_data.get("assigned_staff") or new_data["staff"],
-                    "Duration (min)": new_data["total_duration"],
-                    "Price": new_data["total_price"],
-                    "Status": "Modified",
-                    "Calendar Event ID": new_data.get("calendar_event_id", ""),
-                    "Calendar ID": new_data.get("calendar_id", ""),
-                }
-                self.sheets_logger.update_reservation_data(original_reservation_id, field_updates)
-            except Exception as e:
-                logging.error(f"Failed to update reservation data in sheets: {e}", exc_info=True)
+            field_updates = {
+                "date": new_data["date"],
+                "start_time": new_data.get("start_time", new_data.get("time", "")),
+                "end_time": new_data.get("end_time", ""),
+                "service": new_data["service"],
+                "services": new_data.get("services", []),
+                "selected_staff": new_data.get("selected_staff", ""),
+                "assigned_staff": new_data.get("assigned_staff") or new_data["staff"],
+                "staff": new_data.get("assigned_staff") or new_data["staff"],
+                "total_duration": new_data["total_duration"],
+                "total_price": new_data["total_price"],
+                "status": "Modified",
+                "calendar_event_id": new_data.get("calendar_event_id", ""),
+                "calendar_id": new_data.get("calendar_id", ""),
+                "calendar_html_link": new_data.get("calendar_html_link", ""),
+                "client_name": client_name,
+            }
+
+            # DB_PRIMARY=true の場合、ここでSupabaseを正本として更新します。
+            primary_update_success = self.reservation_repository.update_reservation_data(
+                original_reservation_id,
+                field_updates,
+            )
+            if not primary_update_success:
+                logging.error(
+                    "Primary repository update failed after calendar modification. "
+                    f"reservation_id={original_reservation_id}"
+                )
+                return (
+                    "予約変更処理中に確認が必要な状態になりました。\n\n"
+                    "サロン側で予約状況を確認いたしますので、"
+                    "同じ内容で再度変更操作を行わず、少しお待ちください。"
+                )
+
+            # DBの更新が成功した後だけ、運営確認用Sheetsへ反映します。
+            if self.db_primary_active:
+                try:
+                    self.sheets_logger.update_reservation_data(original_reservation_id, field_updates)
+                except Exception as e:
+                    logging.error(
+                        f"Sheets backup update failed after DB reservation modification: {e}",
+                        exc_info=True,
+                    )
 
             try:
                 self.google_calendar._clear_runtime_caches()
@@ -3849,8 +3877,9 @@ class ReservationFlow:
         try:
             import pytz
 
-            sheets_logger = self.sheets_logger
-            reservations = sheets_logger.get_user_reservations_by_user_id(user_id)
+            # DB_PRIMARY=true の場合はDBを正本として予約を取得します。
+            # DBを無効にしている場合は、従来どおりSheets Repositoryが使われます。
+            reservations = self.reservation_repository.get_user_reservations_by_user_id(user_id)
 
             if not reservations:
                 if user_id in self.user_states:
@@ -4084,8 +4113,9 @@ class ReservationFlow:
         try:
             import pytz
 
-            sheets_logger = self.sheets_logger
-            reservations = sheets_logger.get_user_reservations_by_user_id(user_id)
+            # DB_PRIMARY=true の場合はDBを正本として予約を取得します。
+            # DBを無効にしている場合は、従来どおりSheets Repositoryが使われます。
+            reservations = self.reservation_repository.get_user_reservations_by_user_id(user_id)
 
             if not reservations:
                 if user_id in self.user_states:
@@ -4291,19 +4321,47 @@ class ReservationFlow:
             logging.error(f"Error checking cancellation time limit: {e}")
 
         try:
-            sheets_logger = self.sheets_logger
-
             reservation_id = reservation["reservation_id"]
-            sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
+            previous_status = reservation.get("status") or "Confirmed"
 
-            if not sheets_success:
-                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+            # DB_PRIMARY=true の場合、Supabaseを正本として先にキャンセル状態へ更新します。
+            primary_success = self.reservation_repository.update_reservation_status(
+                reservation_id,
+                "Cancelled",
+            )
+            if not primary_success:
+                return "申し訳ございません。キャンセル情報の保存に失敗しました。\nもう一度お試しください。"
 
             staff_name = reservation.get("staff")
             calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id, staff_name)
 
             if not calendar_success:
-                logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
+                logging.error(
+                    f"Calendar cancellation failed after primary repository cancellation. "
+                    f"reservation_id={reservation_id}"
+                )
+                try:
+                    self.reservation_repository.update_reservation_status(reservation_id, previous_status)
+                except Exception as rollback_error:
+                    logging.critical(
+                        f"Failed to restore repository status after calendar cancellation failure: {rollback_error}",
+                        exc_info=True,
+                    )
+                return (
+                    "キャンセル処理中に確認が必要な状態になりました。\n\n"
+                    "サロン側で予約状況を確認いたしますので、"
+                    "同じ操作を繰り返さず、少しお待ちください。"
+                )
+
+            # DBとCalendarが成功した後だけSheetsにもキャンセルを反映します。
+            if self.db_primary_active:
+                try:
+                    self.sheets_logger.update_reservation_status(reservation_id, "Cancelled")
+                except Exception as e:
+                    logging.error(
+                        f"Sheets backup update failed after DB reservation cancellation: {e}",
+                        exc_info=True,
+                    )
 
             try:
                 self.google_calendar._clear_runtime_caches()
@@ -4319,7 +4377,8 @@ class ReservationFlow:
             except Exception as e:
                 logging.error(f"Failed to send reservation cancellation notification: {e}")
 
-            del self.user_states[user_id]
+            if user_id in self.user_states:
+                del self.user_states[user_id]
 
             fallback_text = """✅キャンセルが完了しました。
 
@@ -4328,8 +4387,9 @@ class ReservationFlow:
             return self._get_reservation_message("cancellation_complete", context_data, fallback=fallback_text)
 
         except Exception as e:
-            logging.error(f"Reservation cancellation execution failed: {e}")
-            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください"
+            logging.error(f"Reservation cancellation execution failed: {e}", exc_info=True)
+            return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+
 
     def _handle_reservation_id_cancellation(self, user_id: str, reservation_id: str) -> str:
         try:
