@@ -24,8 +24,10 @@ class ReservationFlow:
         self.sheets_logger = get_sheets_logger()
 
         # DB保存への切り替え設定
-        # DB_ENABLED=true かつ DB_PRIMARY=true の場合のみDB Repositoryを利用します。
-        # それ以外の場合は、従来どおりGoogle Sheetsへ保存します。
+        # DB_ENABLED=true かつ DB_PRIMARY=true の場合は、
+        # Supabase/PostgreSQL を予約データの正本として利用します。
+        # DB正本運用中に初期化へ失敗した場合は、データ分裂を防ぐため
+        # Google Sheetsへ自動フォールバックせず、初期化エラーとして停止します。
         self.db_enabled = os.getenv("DB_ENABLED", "false").lower() == "true"
         self.db_primary = os.getenv("DB_PRIMARY", "false").lower() == "true"
         self.db_primary_active = False
@@ -33,20 +35,18 @@ class ReservationFlow:
 
         if self.db_enabled and self.db_primary:
             try:
-                # DB保存を有効化した場合だけ読み込むことで、
-                # DB未設定時に既存のSheets運用を壊さないようにします。
                 from api.repositories.database_reservation_repository import DatabaseReservationRepository
 
                 self.reservation_repository = DatabaseReservationRepository()
                 self.db_primary_active = True
                 logging.info("Reservation repository switched to DatabaseReservationRepository.")
             except Exception as e:
-                logging.error(
-                    f"Failed to initialize DatabaseReservationRepository. "
-                    f"Falling back to Google Sheets. error={e}",
+                logging.critical(
+                    f"DB_PRIMARY is enabled, but DatabaseReservationRepository "
+                    f"could not be initialized. error={e}",
                     exc_info=True,
                 )
-                self.reservation_repository = self.sheets_logger
+                raise RuntimeError("Primary reservation database initialization failed.") from e
         else:
             logging.info("Reservation repository uses Google Sheets.")
 
@@ -4392,17 +4392,61 @@ class ReservationFlow:
 
 
     def _handle_reservation_id_cancellation(self, user_id: str, reservation_id: str) -> str:
+        """予約ID指定のキャンセル経路でも、正本Repositoryを必ず更新する。"""
         try:
-            sheets_logger = self.sheets_logger
-            sheets_success = sheets_logger.update_reservation_status(reservation_id, "Cancelled")
+            previous_reservation = self.reservation_repository.get_reservation_by_id(reservation_id)
+            previous_status = (
+                previous_reservation.get("status")
+                if isinstance(previous_reservation, dict)
+                else "Confirmed"
+            ) or "Confirmed"
 
-            if not sheets_success:
-                return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
+            primary_success = self.reservation_repository.update_reservation_status(
+                reservation_id,
+                "Cancelled",
+            )
+            if not primary_success:
+                return "申し訳ございません。キャンセル情報の保存に失敗しました。\nもう一度お試しください。"
 
-            calendar_success = self.google_calendar.cancel_reservation_by_id(reservation_id)
+            staff_name = (
+                previous_reservation.get("staff")
+                if isinstance(previous_reservation, dict)
+                else None
+            )
+            calendar_success = self.google_calendar.cancel_reservation_by_id(
+                reservation_id,
+                staff_name,
+            )
 
             if not calendar_success:
-                logging.warning(f"Failed to remove reservation {reservation_id} from Google Calendar")
+                logging.error(
+                    "Calendar cancellation failed after primary repository cancellation. "
+                    f"reservation_id={reservation_id}"
+                )
+                try:
+                    self.reservation_repository.update_reservation_status(
+                        reservation_id,
+                        previous_status,
+                    )
+                except Exception as rollback_error:
+                    logging.critical(
+                        f"Failed to restore repository status after calendar cancellation failure: {rollback_error}",
+                        exc_info=True,
+                    )
+                return (
+                    "キャンセル処理中に確認が必要な状態になりました。\n\n"
+                    "サロン側で予約状況を確認いたしますので、"
+                    "同じ操作を繰り返さず、少しお待ちください。"
+                )
+
+            if self.db_primary_active:
+                try:
+                    self.sheets_logger.update_reservation_status(reservation_id, "Cancelled")
+                except Exception as e:
+                    logging.error(
+                        f"Sheets backup cancellation sync failed: {e}",
+                        exc_info=True,
+                    )
 
             try:
                 self.google_calendar._clear_runtime_caches()
@@ -4413,10 +4457,14 @@ class ReservationFlow:
             fallback_text = """✅キャンセルが完了しました。
 
 ご都合が合う日があれば、いつでもご予約お待ちしております😊"""
-            return self._get_reservation_message("cancellation_complete", self._build_message_context(user_id), fallback=fallback_text)
+            return self._get_reservation_message(
+                "cancellation_complete",
+                self._build_message_context(user_id),
+                fallback=fallback_text,
+            )
 
         except Exception as e:
-            logging.error(f"Reservation ID cancellation failed: {e}")
+            logging.error(f"Reservation ID cancellation failed: {e}", exc_info=True)
             return "申し訳ございません。エラーが発生しました。\nもう一度お試しください。"
 
 
