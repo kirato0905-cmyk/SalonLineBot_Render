@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
 from api.db.session import SessionLocal
@@ -231,7 +231,13 @@ class DatabaseReservationRepository:
 
             data = field_updates or {}
             if "status" in data or "Status" in data:
-                reservation.status = self._db_status(data.get("status", data.get("Status")))
+                new_status = self._db_status(data.get("status", data.get("Status")))
+                reservation.status = new_status
+
+                if new_status == "cancelled":
+                    reservation.cancelled_at = datetime.now(timezone.utc)
+                else:
+                    reservation.cancelled_at = None
             if data.get("date") or data.get("Date"):
                 reservation.date = self._parse_date(data.get("date", data.get("Date")))
             if data.get("start_time") or data.get("Start Time"):
@@ -270,7 +276,7 @@ class DatabaseReservationRepository:
             reservation.client_name = data.get("client_name", reservation.client_name)
             reservation.phone_number = data.get("phone_number", reservation.phone_number)
             reservation.remarks = data.get("remarks", data.get("note", reservation.remarks))
-            reservation.modified_at = datetime.now()
+            reservation.modified_at = datetime.now(timezone.utc)
 
             db.commit()
             return True
