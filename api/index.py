@@ -3,6 +3,7 @@ import re
 import logging
 import threading
 from urllib.parse import parse_qs
+from typing import Optional
 
 from fastapi import FastAPI, Request, Header, HTTPException
 from dotenv import load_dotenv
@@ -36,6 +37,7 @@ from api.service_menu import (
 from api.staff_intro import send_staff_intro
 from api.google_sheets_logger import get_sheets_logger
 from api.user_consent_manager import user_consent_manager
+from api.repositories.database_customer_repository import DatabaseCustomerRepository
 
 load_dotenv()
 
@@ -47,6 +49,9 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# Supabase/PostgreSQL を顧客情報の正本として扱う Repository
+customer_repo = DatabaseCustomerRepository()
 
 # Initialize AI modules with error handling
 try:
@@ -86,6 +91,49 @@ CONSENT_MESSAGE_TEXTS = {
 }
 
 
+
+def ensure_customer_in_database(user_id: str, display_name: str = "") -> None:
+    """LINE上で接触したユーザーを顧客DBに作成・同期する。DB障害でLINE返信は止めない。"""
+    if not user_id:
+        return
+    try:
+        customer_repo.get_or_create_customer(
+            line_user_id=user_id,
+            display_name=display_name if display_name and display_name != "Unknown" else None,
+        )
+    except Exception as e:
+        logging.error(f"Could not sync customer to database. user_id={user_id}, error={e}", exc_info=True)
+
+
+def update_customer_phone_in_database(user_id: str, display_name: str, phone_number: str) -> None:
+    """入力された電話番号を顧客DBに保存する。"""
+    try:
+        ensure_customer_in_database(user_id, display_name)
+        customer_repo.update_profile(
+            line_user_id=user_id,
+            display_name=display_name if display_name and display_name != "Unknown" else None,
+            phone_number=phone_number,
+        )
+    except Exception as e:
+        logging.error(f"Could not update customer phone in database. user_id={user_id}, error={e}", exc_info=True)
+
+
+def update_customer_consent_in_database(user_id: str, display_name: str, consented: bool) -> None:
+    """利用案内への同意状態を顧客DBに保存する。"""
+    try:
+        ensure_customer_in_database(user_id, display_name)
+        customer_repo.set_consent(line_user_id=user_id, consented=consented)
+    except Exception as e:
+        logging.error(f"Could not update customer consent in database. user_id={user_id}, error={e}", exc_info=True)
+
+
+def update_customer_input_state_in_database(user_id: str, input_state: Optional[str]) -> None:
+    """予約・登録フローの進行状態を顧客DBに保存する。"""
+    try:
+        customer_repo.update_input_state(line_user_id=user_id, input_state=input_state)
+    except Exception as e:
+        logging.error(f"Could not update customer input state in database. user_id={user_id}, error={e}", exc_info=True)
+
 def set_phone_input_waiting(user_id: str) -> None:
     with _PHONE_INPUT_LOCK:
         _PHONE_INPUT_WAITING_USERS.add(user_id)
@@ -93,6 +141,7 @@ def set_phone_input_waiting(user_id: str) -> None:
         get_sheets_logger().set_user_input_state(user_id, "電話番号入力待ち")
     except Exception as e:
         logging.warning(f"Could not persist phone input waiting state for {user_id}: {e}")
+    update_customer_input_state_in_database(user_id, "waiting_phone")
 
 
 def clear_phone_input_waiting(user_id: str) -> None:
@@ -102,6 +151,7 @@ def clear_phone_input_waiting(user_id: str) -> None:
         get_sheets_logger().set_user_input_state(user_id, "利用可能")
     except Exception as e:
         logging.warning(f"Could not clear persisted phone input waiting state for {user_id}: {e}")
+    update_customer_input_state_in_database(user_id, None)
 
 
 def is_phone_input_waiting(user_id: str) -> bool:
@@ -212,6 +262,7 @@ def handle_phone_number_input(user_id: str, user_name: str, message_text: str, r
             )
             return
 
+        update_customer_phone_in_database(user_id, user_name, normalized_phone)
         clear_phone_input_waiting(user_id)
         reply_text(reply_token, build_welcome_after_phone_message())
         logging.info(f"User phone number registered: {user_id} ({user_name})")
@@ -312,9 +363,10 @@ def handle_message(event: MessageEvent):
     user_id = event.source.user_id
     reply = ""
     quick_reply_items = []
-    user_name = ""
+    user_name = get_cached_display_name(user_id)
 
-    user_name = "Unknown"
+    # メッセージを受け取った時点で、予約前でも顧客DBへ作成・同期する。
+    ensure_customer_in_database(user_id, user_name)
 
     # Check consent (except for consent-related messages / phone input after consent)
     if (
@@ -568,6 +620,7 @@ def handle_postback(event: PostbackEvent):
     reply_text_value = ""
 
     user_name = get_cached_display_name(user_id)
+    ensure_customer_in_database(user_id, user_name)
 
     if action == "view_consent_detail":
         return handle_consent_detail(user_id, user_name, event.reply_token)
@@ -650,6 +703,9 @@ def handle_follow(event: FollowEvent):
     """Handle when a user adds the bot as a friend"""
     user_id = event.source.user_id
     user_name = get_cached_display_name(user_id)
+
+    # 友だち追加時点で顧客DBにも登録する。
+    ensure_customer_in_database(user_id, user_name)
 
     try:
         sheets_logger = get_sheets_logger()
@@ -843,6 +899,7 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
                 logging.warning(f"Could not ensure user row before consent. user_id={user_id}, error={e}")
 
             user_consent_manager.mark_user_consented(user_id)
+            update_customer_consent_in_database(user_id, user_name, True)
 
             # 電話番号が未登録なら、絶対にウェルカムへ進めず電話番号入力へ送る。
             if not user_has_registered_phone(user_id):
@@ -887,6 +944,7 @@ def handle_consent_response(user_id: str, user_name: str, message_text: str, rep
                     )
                 )
 
+            update_customer_consent_in_database(user_id, user_name, False)
             clear_phone_input_waiting(user_id)
             print(f"User declined consent: {user_id} ({user_name})")
 
